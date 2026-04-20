@@ -16,9 +16,6 @@ import {
 	normalizeEvents,
 } from "./helpers";
 
-export const ensureIntervalMs = 60 * 1000;
-export const lastEnsuredAtByHash = new Map<string, number>();
-
 export function registerRoutes(
 	http: HttpRouter,
 	component: ComponentApi,
@@ -62,24 +59,18 @@ export function registerRoutes(
 				);
 			}
 			const writeKeyHash = await hashWriteKey(writeKey);
-			const configuredSite =
-				configuredSites.length > 0
-					? await findConfiguredSite(configuredSites, writeKeyHash)
-					: null;
-			if (configuredSites.length > 0 && !configuredSite) {
-				return jsonResponse(
-					{ error: "Invalid analytics write key" },
-					401,
-					origin,
-				);
-			}
-			if (configuredSite) {
-				await ensureConfiguredSite(
-					ctx,
-					component,
-					configuredSite,
+			if (configuredSites.length > 0) {
+				const configuredSite = await findConfiguredSite(
+					configuredSites,
 					writeKeyHash,
 				);
+				if (!configuredSite) {
+					return jsonResponse(
+						{ error: "Invalid analytics write key" },
+						401,
+						origin,
+					);
+				}
 			}
 			const body = await request.json();
 			const result = await ingestFromHttp(ctx, component, {
@@ -145,32 +136,3 @@ export async function findConfiguredSite(
 	return null;
 }
 
-export async function ensureConfiguredSite(
-	ctx: ActionCtx,
-	component: ComponentApi,
-	site: SiteConfig,
-	writeKeyHash: string,
-) {
-	const now = Date.now();
-	const lastEnsuredAt = lastEnsuredAtByHash.get(writeKeyHash) ?? 0;
-	if (now - lastEnsuredAt < ensureIntervalMs) {
-		return;
-	}
-
-	await ctx.runMutation(component.sites.ensureSite, {
-		slug: site.slug,
-		name: site.name,
-		writeKeyHash,
-		allowedOrigins: site.allowedOrigins,
-		sessionTimeoutMs: site.sessionTimeoutMs,
-		retentionDays: site.retentionDays,
-		rawEventRetentionDays: site.rawEventRetentionDays,
-		pageViewRetentionDays: site.pageViewRetentionDays,
-		hourlyRollupRetentionDays: site.hourlyRollupRetentionDays,
-		dailyRollupRetentionDays: site.dailyRollupRetentionDays,
-		dedupeRetentionMs: site.dedupeRetentionMs,
-		allowedPropertyKeys: site.allowedPropertyKeys,
-		deniedPropertyKeys: site.deniedPropertyKeys,
-	});
-	lastEnsuredAtByHash.set(writeKeyHash, now);
-}

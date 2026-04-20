@@ -124,23 +124,9 @@ export const ingestBatch = mutation({
 			});
 			insertedEventIds.push(eventDbId);
 
-			if (event.type === "pageview" && event.path) {
-				await ctx.db.insert("pageViews", {
-					siteId: site._id,
-					occurredAt,
-					visitorId: args.visitorId,
-					sessionId: args.sessionId,
-					path: event.path,
-					title: event.title,
-					referrer: event.referrer,
-					utmSource: args.context?.utmSource,
-					utmMedium: args.context?.utmMedium,
-					utmCampaign: args.context?.utmCampaign,
-				});
-			}
-
 			accepted += 1;
 		}
+
 
 		if (insertedEventIds.length > 0) {
 			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
@@ -270,6 +256,20 @@ export async function aggregateEventsByIds(
 				newVisitor: visitor.created,
 				shard: shardForEvent(event._id),
 			});
+			if (event.eventType === "pageview" && event.path) {
+				await ctx.db.insert("pageViews", {
+					siteId: event.siteId,
+					occurredAt: event.occurredAt,
+					visitorId: event.visitorId,
+					sessionId: event.sessionId,
+					path: event.path,
+					title: event.title,
+					referrer: event.referrer,
+					utmSource: event.utmSource,
+					utmMedium: event.utmMedium,
+					utmCampaign: event.utmCampaign,
+				});
+			}
 			await ctx.db.patch(event._id, {
 				contributesSession: session.created,
 				contributesVisitor: visitor.created,
