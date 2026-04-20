@@ -110,6 +110,68 @@ registerRoutes(http, components.convexAnalytics, {
 export default http;
 ```
 
+Add default maintenance wrappers once:
+
+```ts
+// convex/cleanup.ts
+import { components } from "./_generated/api";
+import { internalMutation } from "./_generated/server";
+import { v } from "convex/values";
+import {
+  runCleanupSite,
+  runPruneExpired,
+} from "@Abdssamie/convex-analytics";
+
+export const site = internalMutation({
+  args: {
+    siteId: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+    runUntilComplete: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    return await runCleanupSite(ctx, components.convexAnalytics, args);
+  },
+});
+
+export const dedupes = internalMutation({
+  args: {
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await runPruneExpired(ctx, components.convexAnalytics, args);
+  },
+});
+```
+
+Then register default crons:
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+import { registerDefaultAnalyticsCrons } from "@Abdssamie/convex-analytics";
+
+const crons = cronJobs();
+
+registerDefaultAnalyticsCrons(
+  crons,
+  {
+    cleanupSite: internal.cleanup.site,
+    pruneExpired: internal.cleanup.dedupes,
+  },
+  {
+    slug: "default",
+  },
+);
+
+export default crons;
+```
+
+That is enough for normal installs.
+
 For multiple sites on the same Convex deployment, add more site configs with
 separate write keys and origins:
 
@@ -261,8 +323,10 @@ registerRoutes(http, components.convexAnalytics, {
 });
 ```
 
-Cleanup is explicit so you control request volume and billing. A small scheduled
-cron is enough for most apps:
+Cleanup is explicit so you control request volume and billing. For most apps,
+use the default helper above and stop thinking about it.
+
+If you want custom schedules, this is the manual shape:
 
 ```ts
 // convex/cleanup.ts
