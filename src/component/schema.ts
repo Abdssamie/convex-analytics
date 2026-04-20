@@ -61,6 +61,11 @@ export default defineSchema({
 		bounce: v.boolean(),
 	})
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
+		.index("by_siteId_and_sessionId_and_startedAt", [
+			"siteId",
+			"sessionId",
+			"startedAt",
+		])
 		.index("by_siteId_and_startedAt", ["siteId", "startedAt"])
 		.index("by_siteId_and_visitorId_and_startedAt", [
 			"siteId",

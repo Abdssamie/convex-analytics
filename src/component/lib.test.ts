@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
@@ -128,6 +128,8 @@ async function insertPendingPageviewEvents(
 
 describe("realistic ingestion, sharding, and compaction flows", () => {
 	test("scheduled worker materializes visitors, sessions, pageviews, and rollups after append-only ingest", async () => {
+		vi.useFakeTimers();
+		try {
 		const { t, siteId, writeKeyHash } = await createSite();
 		const base = Date.UTC(2026, 0, 1, 9, 0, 0);
 
@@ -228,7 +230,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(before.pendingEvents).toHaveLength(8);
 		expect(before.pageViews).toHaveLength(0);
 
-		await t.finishAllScheduledFunctions(() => {});
+		await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
 		const after = await countSiteRows(t, siteId, base + 3 * hourMs);
 		expect(after.pendingEvents).toHaveLength(0);
@@ -322,6 +324,9 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(rawEvents.every((row) => row.aggregationStatus === "done")).toBe(true);
 		expect(rawEvents.filter((row) => row.contributesVisitor)).toHaveLength(2);
 		expect(rawEvents.filter((row) => row.contributesSession)).toHaveLength(3);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	test("backfilled raw events create shard fanout, compaction collapses it, analytics stay exact", async () => {
@@ -561,5 +566,65 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			},
 		]);
 		expect(recentRows.length).toBeGreaterThan(1);
+	});
+
+	test("reused sessionId after timeout creates new session row instead of colliding", async () => {
+		const { t, siteId } = await createSite({ sessionTimeoutMs: 30_000 });
+		const now = Date.UTC(2026, 0, 10, 12, 0, 0);
+		const eventIds = await t.run(async (ctx) => {
+			const first = await ctx.db.insert("events", {
+				siteId,
+				receivedAt: now,
+				occurredAt: now,
+				visitorId: "visitor-1",
+				sessionId: "shared-session",
+				eventType: "pageview",
+				eventName: "pageview",
+				path: "/",
+				title: "Home",
+				aggregationStatus: "pending",
+				aggregationAttempts: 0,
+			});
+			const second = await ctx.db.insert("events", {
+				siteId,
+				receivedAt: now,
+				occurredAt: now + 120_000,
+				visitorId: "visitor-1",
+				sessionId: "shared-session",
+				eventType: "pageview",
+				eventName: "pageview",
+				path: "/pricing",
+				title: "Pricing",
+				aggregationStatus: "pending",
+				aggregationAttempts: 0,
+			});
+			return [first, second];
+		});
+
+		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+
+		const sessions = await t.query(api.analytics.listSessions, {
+			siteId,
+			limit: 10,
+		});
+		expect(sessions).toHaveLength(2);
+		expect(sessions.map((row) => row.sessionId)).toEqual([
+			"shared-session",
+			"shared-session",
+		]);
+		expect(sessions[0]).toMatchObject({
+			startedAt: now + 120_000,
+			entryPath: "/pricing",
+			exitPath: "/pricing",
+			pageviewCount: 1,
+			eventCount: 1,
+		});
+		expect(sessions[1]).toMatchObject({
+			startedAt: now,
+			entryPath: "/",
+			exitPath: "/",
+			pageviewCount: 1,
+			eventCount: 1,
+		});
 	});
 });

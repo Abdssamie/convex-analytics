@@ -355,10 +355,11 @@ export async function upsertSession(
 ) {
 	const existing = await ctx.db
 		.query("sessions")
-		.withIndex("by_siteId_and_sessionId", (q) =>
+		.withIndex("by_siteId_and_sessionId_and_startedAt", (q) =>
 			q.eq("siteId", args.siteId).eq("sessionId", args.sessionId),
 		)
-		.unique();
+		.order("desc")
+		.first();
 	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	const isNewSession =
 		!existing ||
