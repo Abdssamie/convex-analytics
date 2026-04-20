@@ -8,6 +8,7 @@ export const {
   ensureSite,
   updateSite,
   rotateWriteKey,
+  aggregatePending,
   getSiteBySlug,
   getOverview,
   getTimeseries,

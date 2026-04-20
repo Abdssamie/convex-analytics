@@ -24,6 +24,13 @@ import type { FunctionReference } from "convex/server";
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
     lib: {
+      aggregatePending: FunctionReference<
+        "mutation",
+        "internal",
+        { limit?: number; now?: number; siteId: string },
+        { aggregated: number; remaining: number; skipped: number },
+        Name
+      >;
       createSite: FunctionReference<
         "mutation",
         "internal",
@@ -174,6 +181,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Array<{
           _creationTime: number;
           _id: string;
+          aggregatedAt?: number;
+          aggregationAttempts?: number;
+          aggregationError?: string;
+          aggregationStatus?: "pending" | "done" | "failed";
+          contributesSession?: boolean;
+          contributesVisitor?: boolean;
           dedupeKey?: string;
           eventName: string;
           eventType: "pageview" | "track" | "identify";
@@ -187,6 +200,9 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           siteId: string;
           source?: string;
           title?: string;
+          utmCampaign?: string;
+          utmMedium?: string;
+          utmSource?: string;
           visitorId: string;
         }>,
         Name

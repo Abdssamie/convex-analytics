@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server.js";
+import { api, internal } from "./_generated/api.js";
+import { internalMutation, mutation, query } from "./_generated/server.js";
 import type { Id } from "./_generated/dataModel.js";
 import type { MutationCtx, QueryCtx } from "./_generated/server.js";
 
@@ -72,9 +73,20 @@ const eventValidator = v.object({
   title: v.optional(v.string()),
   referrer: v.optional(v.string()),
   source: v.optional(v.string()),
+  utmSource: v.optional(v.string()),
+  utmMedium: v.optional(v.string()),
+  utmCampaign: v.optional(v.string()),
   properties: propertiesValidator,
   identifiedUserId: v.optional(v.string()),
   dedupeKey: v.optional(v.string()),
+  contributesVisitor: v.optional(v.boolean()),
+  contributesSession: v.optional(v.boolean()),
+  aggregationStatus: v.optional(
+    v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
+  ),
+  aggregationAttempts: v.optional(v.number()),
+  aggregationError: v.optional(v.string()),
+  aggregatedAt: v.optional(v.number()),
 });
 
 const sessionValidator = v.object({
@@ -118,6 +130,8 @@ const dayMs = 24 * hourMs;
 const dedupeTtlMs = 24 * hourMs;
 const maxBatchSize = 50;
 const maxPropertyKeys = 32;
+const rollupShardCount = 16;
+const aggregationBatchLimit = 100;
 
 export const createSite = mutation({
   args: {
@@ -389,6 +403,7 @@ export const ingestBatch = mutation({
     let lastSeenAt = session.lastSeenAt;
     let exitPath = session.exitPath;
     let identifiedUserId = visitor.identifiedUserId;
+    const insertedEventIds: Array<Id<"events">> = [];
 
     for (const event of args.events) {
       const occurredAt = event.occurredAt ?? receivedAt;
@@ -422,8 +437,11 @@ export const ingestBatch = mutation({
       if (event.type === "identify" && event.userId) {
         identifiedUserId = event.userId;
       }
+      const contributesSession = accepted === 0 && newSession;
+      const contributesVisitor =
+        visitor.firstSeenAt === visitor.lastSeenAt && accepted === 0;
 
-      await ctx.db.insert("events", {
+      const eventDbId = await ctx.db.insert("events", {
         siteId: site._id,
         receivedAt,
         occurredAt,
@@ -435,10 +453,18 @@ export const ingestBatch = mutation({
         title: event.title,
         referrer: event.referrer,
         source: args.context?.source,
+        utmSource: args.context?.utmSource,
+        utmMedium: args.context?.utmMedium,
+        utmCampaign: args.context?.utmCampaign,
         properties,
         identifiedUserId,
         dedupeKey,
+        contributesVisitor,
+        contributesSession,
+        aggregationStatus: "pending",
+        aggregationAttempts: 0,
       });
+      insertedEventIds.push(eventDbId);
 
       if (event.type === "pageview" && event.path) {
         await ctx.db.insert("pageViews", {
@@ -456,21 +482,6 @@ export const ingestBatch = mutation({
         exitPath = event.path;
         pageviewCount += 1;
       }
-
-      await updateRollups(ctx, {
-        siteId: site._id,
-        occurredAt,
-        eventName,
-        eventType: event.type,
-        path: event.path,
-        referrer: event.referrer,
-        utmSource: args.context?.utmSource,
-        utmMedium: args.context?.utmMedium,
-        utmCampaign: args.context?.utmCampaign,
-        receivedAt,
-        newSession: accepted === 0 && newSession,
-        newVisitor: visitor.firstSeenAt === visitor.lastSeenAt && accepted === 0,
-      });
 
       accepted += 1;
       eventCount += 1;
@@ -492,6 +503,11 @@ export const ingestBatch = mutation({
       identifiedUserId,
       traits: latestIdentifyTraits(args.events) ?? visitor.traits,
     });
+    if (insertedEventIds.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.lib.aggregateEventBatch, {
+        eventIds: insertedEventIds,
+      });
+    }
 
     return { accepted, duplicate, rejected };
   },
@@ -657,17 +673,122 @@ export const pruneExpired = mutation({
   returns: v.number(),
   handler: async (ctx, args) => {
     const now = args.now ?? Date.now();
-    const rows = await ctx.db.query("ingestDedupes").take(args.limit ?? 100);
+    const rows = await ctx.db
+      .query("ingestDedupes")
+      .withIndex("by_expiresAt", (q) => q.lte("expiresAt", now))
+      .take(Math.min(args.limit ?? 100, 500));
     let deleted = 0;
     for (const row of rows) {
-      if (row.expiresAt <= now) {
-        await ctx.db.delete(row._id);
-        deleted += 1;
-      }
+      await ctx.db.delete(row._id);
+      deleted += 1;
     }
     return deleted;
   },
 });
+
+export const aggregateEventBatch = internalMutation({
+  args: {
+    eventIds: v.array(v.id("events")),
+  },
+  returns: v.object({
+    aggregated: v.number(),
+    skipped: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    return await aggregateEventsByIds(ctx, args.eventIds);
+  },
+});
+
+export const aggregatePending = mutation({
+  args: {
+    siteId: v.id("sites"),
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  returns: v.object({
+    aggregated: v.number(),
+    skipped: v.number(),
+    remaining: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
+    const rows = await ctx.db
+      .query("events")
+      .withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .eq("aggregationStatus", "pending")
+          .lte("occurredAt", args.now ?? Date.now()),
+      )
+      .take(limit + 1);
+    const eventIds = rows.slice(0, limit).map((row) => row._id);
+    const result =
+      eventIds.length === 0
+        ? { aggregated: 0, skipped: 0 }
+        : await aggregateEventsByIds(ctx, eventIds);
+    if (rows.length > limit) {
+      await ctx.scheduler.runAfter(0, api.lib.aggregatePending, {
+        siteId: args.siteId,
+        now: args.now,
+        limit,
+      });
+    }
+    return {
+      aggregated: result.aggregated,
+      skipped: result.skipped,
+      remaining: Math.max(0, rows.length - limit),
+    };
+  },
+});
+
+async function aggregateEventsByIds(
+  ctx: MutationCtx,
+  eventIds: Array<Id<"events">>,
+) {
+  let aggregated = 0;
+  let skipped = 0;
+  const now = Date.now();
+  for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
+    const event = await ctx.db.get(eventId);
+    if (!event || event.aggregationStatus === "done") {
+      skipped += 1;
+      continue;
+    }
+    try {
+      await updateRollupShards(ctx, {
+        siteId: event.siteId,
+        occurredAt: event.occurredAt,
+        eventName: event.eventName,
+        eventType: event.eventType,
+        path: event.path,
+        referrer: event.referrer,
+        utmSource: event.utmSource,
+        utmMedium: event.utmMedium,
+        utmCampaign: event.utmCampaign,
+        receivedAt: now,
+        newSession: event.contributesSession ?? false,
+        newVisitor: event.contributesVisitor ?? false,
+        shard: shardForEvent(event._id),
+      });
+      await ctx.db.patch(event._id, {
+        aggregationStatus: "done",
+        aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
+        aggregationError: "",
+        aggregatedAt: now,
+      });
+      aggregated += 1;
+    } catch (error) {
+      await ctx.db.patch(event._id, {
+        aggregationStatus: "failed",
+        aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
+        aggregationError:
+          error instanceof Error ? error.message : "Aggregation failed",
+      });
+      throw error;
+    }
+  }
+  return { aggregated, skipped };
+}
 
 async function upsertVisitor(
   ctx: MutationCtx,
@@ -780,7 +901,7 @@ function latestIdentifyTraits(
   return undefined;
 }
 
-async function updateRollups(
+async function updateRollupShards(
   ctx: MutationCtx,
   args: {
     siteId: IdOfSite;
@@ -795,6 +916,7 @@ async function updateRollups(
     receivedAt: number;
     newVisitor: boolean;
     newSession: boolean;
+    shard: number;
   },
 ) {
   const dimensions = [
@@ -812,14 +934,16 @@ async function updateRollups(
   ].filter((item): item is { dimension: string; key: string } => item !== null);
 
   for (const item of dimensions) {
-    await incrementRollup(ctx, "rollupsHourly", {
+    await incrementRollupShard(ctx, {
       ...args,
+      interval: "hour",
       bucketStart: floorToBucket(args.occurredAt, hourMs),
       dimension: item.dimension,
       key: item.key,
     });
-    await incrementRollup(ctx, "rollupsDaily", {
+    await incrementRollupShard(ctx, {
       ...args,
+      interval: "day",
       bucketStart: floorToBucket(args.occurredAt, dayMs),
       dimension: item.dimension,
       key: item.key,
@@ -827,14 +951,15 @@ async function updateRollups(
   }
 }
 
-async function incrementRollup(
+async function incrementRollupShard(
   ctx: MutationCtx,
-  table: "rollupsHourly" | "rollupsDaily",
   args: {
     siteId: IdOfSite;
+    interval: "hour" | "day";
     bucketStart: number;
     dimension: string;
     key: string;
+    shard: number;
     eventType: "pageview" | "track" | "identify";
     receivedAt: number;
     newVisitor: boolean;
@@ -842,22 +967,26 @@ async function incrementRollup(
   },
 ) {
   const existing = await ctx.db
-    .query(table)
-    .withIndex("by_siteId_and_dimension_and_key_and_bucketStart", (q) =>
+    .query("rollupShards")
+    .withIndex("by_site_interval_dimension_key_bucket_shard", (q) =>
       q
         .eq("siteId", args.siteId)
+        .eq("interval", args.interval)
         .eq("dimension", args.dimension)
         .eq("key", args.key)
-        .eq("bucketStart", args.bucketStart),
+        .eq("bucketStart", args.bucketStart)
+        .eq("shard", args.shard),
     )
     .unique();
   const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
   if (!existing) {
-    await ctx.db.insert(table, {
+    await ctx.db.insert("rollupShards", {
       siteId: args.siteId,
+      interval: args.interval,
       bucketStart: args.bucketStart,
       dimension: args.dimension,
       key: args.key,
+      shard: args.shard,
       count: 1,
       uniqueVisitorCount: args.newVisitor ? 1 : 0,
       sessionCount: args.newSession ? 1 : 0,
@@ -881,6 +1010,14 @@ function floorToBucket(value: number, bucketMs: number) {
   return Math.floor(value / bucketMs) * bucketMs;
 }
 
+function shardForEvent(eventId: Id<"events">) {
+  let hash = 0;
+  for (let index = 0; index < eventId.length; index += 1) {
+    hash = (hash * 31 + eventId.charCodeAt(index)) >>> 0;
+  }
+  return hash % rollupShardCount;
+}
+
 async function queryHourlyRollups(
   ctx: QueryCtx,
   args: { siteId: IdOfSite; from: number; to: number },
@@ -888,16 +1025,17 @@ async function queryHourlyRollups(
   key: string,
 ) {
   return await ctx.db
-    .query("rollupsHourly")
-    .withIndex("by_siteId_and_dimension_and_key_and_bucketStart", (q) =>
+    .query("rollupShards")
+    .withIndex("by_site_interval_dimension_key_bucket", (q) =>
       q
         .eq("siteId", args.siteId)
+        .eq("interval", "hour")
         .eq("dimension", dimension)
         .eq("key", key)
         .gte("bucketStart", floorToBucket(args.from, hourMs))
         .lt("bucketStart", args.to),
     )
-    .take(2000);
+    .take(2000 * rollupShardCount);
 }
 
 async function queryDailyRollups(
@@ -907,16 +1045,17 @@ async function queryDailyRollups(
   key: string,
 ) {
   return await ctx.db
-    .query("rollupsDaily")
-    .withIndex("by_siteId_and_dimension_and_key_and_bucketStart", (q) =>
+    .query("rollupShards")
+    .withIndex("by_site_interval_dimension_key_bucket", (q) =>
       q
         .eq("siteId", args.siteId)
+        .eq("interval", "day")
         .eq("dimension", dimension)
         .eq("key", key)
         .gte("bucketStart", floorToBucket(args.from, dayMs))
         .lt("bucketStart", args.to),
     )
-    .take(1000);
+    .take(1000 * rollupShardCount);
 }
 
 function sumRollups(
@@ -956,19 +1095,18 @@ async function topDimension(
   limit: number,
 ) {
   const rows = await ctx.db
-    .query("rollupsDaily")
-    .withIndex("by_siteId_and_bucketStart", (q) =>
+    .query("rollupShards")
+    .withIndex("by_site_interval_dimension_bucket", (q) =>
       q
         .eq("siteId", args.siteId)
+        .eq("interval", "day")
+        .eq("dimension", dimension)
         .gte("bucketStart", floorToBucket(args.from, dayMs))
         .lt("bucketStart", args.to),
     )
-    .take(5000);
+    .take(5000 * rollupShardCount);
   const byKey = new Map<string, { count: number; pageviewCount: number }>();
   for (const row of rows) {
-    if (row.dimension !== dimension) {
-      continue;
-    }
     const current = byKey.get(row.key) ?? { count: 0, pageviewCount: 0 };
     current.count += row.count;
     current.pageviewCount += row.pageviewCount;

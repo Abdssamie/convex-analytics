@@ -82,9 +82,20 @@ export default defineSchema({
     title: v.optional(v.string()),
     referrer: v.optional(v.string()),
     source: v.optional(v.string()),
+    utmSource: v.optional(v.string()),
+    utmMedium: v.optional(v.string()),
+    utmCampaign: v.optional(v.string()),
     properties: v.optional(v.record(v.string(), propertyValue)),
     identifiedUserId: v.optional(v.string()),
     dedupeKey: v.optional(v.string()),
+    contributesVisitor: v.optional(v.boolean()),
+    contributesSession: v.optional(v.boolean()),
+    aggregationStatus: v.optional(
+      v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
+    ),
+    aggregationAttempts: v.optional(v.number()),
+    aggregationError: v.optional(v.string()),
+    aggregatedAt: v.optional(v.number()),
   })
     .index("by_siteId_and_occurredAt", ["siteId", "occurredAt"])
     .index("by_siteId_and_eventName_and_occurredAt", [
@@ -92,7 +103,12 @@ export default defineSchema({
       "eventName",
       "occurredAt",
     ])
-    .index("by_siteId_and_sessionId", ["siteId", "sessionId"]),
+    .index("by_siteId_and_sessionId", ["siteId", "sessionId"])
+    .index("by_siteId_and_aggregationStatus_and_occurredAt", [
+      "siteId",
+      "aggregationStatus",
+      "occurredAt",
+    ]),
 
   pageViews: defineTable({
     siteId: v.id("sites"),
@@ -113,11 +129,13 @@ export default defineSchema({
       "occurredAt",
     ]),
 
-  rollupsHourly: defineTable({
+  rollupShards: defineTable({
     siteId: v.id("sites"),
+    interval: v.union(v.literal("hour"), v.literal("day")),
     bucketStart: v.number(),
     dimension: v.string(),
     key: v.string(),
+    shard: v.number(),
     count: v.number(),
     uniqueVisitorCount: v.number(),
     sessionCount: v.number(),
@@ -126,32 +144,25 @@ export default defineSchema({
     durationMs: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_siteId_and_bucketStart", ["siteId", "bucketStart"])
-    .index("by_siteId_and_dimension_and_key_and_bucketStart", [
+    .index("by_site_interval_dimension_key_bucket_shard", [
       "siteId",
+      "interval",
       "dimension",
       "key",
       "bucketStart",
-    ]),
-
-  rollupsDaily: defineTable({
-    siteId: v.id("sites"),
-    bucketStart: v.number(),
-    dimension: v.string(),
-    key: v.string(),
-    count: v.number(),
-    uniqueVisitorCount: v.number(),
-    sessionCount: v.number(),
-    pageviewCount: v.number(),
-    bounceCount: v.number(),
-    durationMs: v.number(),
-    updatedAt: v.number(),
-  })
-    .index("by_siteId_and_bucketStart", ["siteId", "bucketStart"])
-    .index("by_siteId_and_dimension_and_key_and_bucketStart", [
+      "shard",
+    ])
+    .index("by_site_interval_dimension_key_bucket", [
       "siteId",
+      "interval",
       "dimension",
       "key",
+      "bucketStart",
+    ])
+    .index("by_site_interval_dimension_bucket", [
+      "siteId",
+      "interval",
+      "dimension",
       "bucketStart",
     ]),
 
@@ -159,5 +170,7 @@ export default defineSchema({
     siteId: v.id("sites"),
     dedupeKey: v.string(),
     expiresAt: v.number(),
-  }).index("by_siteId_and_dedupeKey", ["siteId", "dedupeKey"]),
+  })
+    .index("by_siteId_and_dedupeKey", ["siteId", "dedupeKey"])
+    .index("by_expiresAt", ["expiresAt"]),
 });

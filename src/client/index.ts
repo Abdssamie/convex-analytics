@@ -148,6 +148,20 @@ export function exposeApi(
         });
       },
     }),
+    aggregatePending: mutationGeneric({
+      args: {
+        siteId: v.string(),
+        now: v.optional(v.number()),
+        limit: v.optional(v.number()),
+      },
+      handler: async (ctx, args) => {
+        await options.auth(ctx, {
+          type: "admin",
+          siteId: args.siteId,
+        });
+        return await ctx.runMutation(component.lib.aggregatePending, args);
+      },
+    }),
     getSiteBySlug: queryGeneric({
       args: { slug: v.string() },
       handler: async (ctx, args) => {

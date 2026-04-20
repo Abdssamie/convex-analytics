@@ -2,7 +2,7 @@
 
 A Convex component for first-party product and web analytics. It stores events
 directly in your Convex deployment, with browser batching, anonymous visitors,
-sessions, raw event history, and rollup-backed reports.
+sessions, raw event history, and async rollup-backed reports.
 
 This component is designed for apps that want Rybbit-style core analytics
 without running a separate analytics service.
@@ -25,9 +25,9 @@ The component owns its own Convex tables:
 - `sites`: one tracked site/app per write key
 - `visitors`: durable anonymous visitor records
 - `sessions`: session windows and coarse device/source summary
-- `events`: append-only raw events
+- `events`: append-only raw events with pending/done aggregation state
 - `pageViews`: denormalized pageview rows
-- `rollupsHourly` and `rollupsDaily`: report counters
+- `rollupShards`: sharded hourly/daily report counters
 - `ingestDedupes`: short-lived retry/idempotency cache
 
 Why `sites` exists: one Convex deployment can track multiple sites or apps.
@@ -37,6 +37,12 @@ multi-site parts until needed.
 Browser traffic should use the HTTP ingest route. Do not send every browser
 event through public Convex mutations. The SDK batches events and the HTTP route
 hashes the write key before calling the component.
+
+Ingest and reporting are split on purpose. The ingest mutation writes raw events
+quickly, marks them `pending`, and schedules background aggregation. The
+aggregator updates sharded rollup counters and marks each event `done` in the
+same transaction, so retries do not double-count. Reports read `rollupShards`,
+so they can lag raw events by a few seconds.
 
 ## Installation
 
@@ -117,6 +123,7 @@ export const {
   getOverview,
   getTimeseries,
   getTopPages,
+  aggregatePending,
   listRawEvents,
   listSessions,
 } = exposeApi(components.convexAnalytics, {
@@ -166,7 +173,9 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Raw events are slim.
 - Write keys are hashed before reaching component storage.
 - Retry dedupe prevents duplicate event inserts.
-- Reports use hourly/daily rollups for common dashboard queries.
+- Ingest does not patch report counters inline.
+- Reports use sharded hourly/daily rollups for common analytics queries.
+- `aggregatePending` can repair missed pending events after deploys or failures.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.
 

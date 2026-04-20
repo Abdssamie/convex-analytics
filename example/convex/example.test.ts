@@ -23,6 +23,10 @@ describe("example", () => {
       ],
     });
     expect(result.accepted).toBe(1);
+    await t.mutation(api.example.aggregatePending, {
+      siteId,
+      now: now + 1000,
+    });
 
     const overview = await t.query(api.example.getOverview, {
       siteId,

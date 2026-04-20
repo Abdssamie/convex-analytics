@@ -41,6 +41,10 @@ describe("component lib", () => {
     });
 
     expect(result).toEqual({ accepted: 2, duplicate: 0, rejected: 0 });
+    await t.mutation(api.lib.aggregatePending, {
+      siteId,
+      now: now + 2000,
+    });
 
     const overview = await t.query(api.lib.getOverview, {
       siteId,
