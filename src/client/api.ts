@@ -44,7 +44,7 @@ export function exposeApi(
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 				} = args;
-				return await ctx.runMutation(component.lib.createSite, {
+				return await ctx.runMutation(component.sites.createSite, {
 					slug,
 					name,
 					allowedOrigins,
@@ -94,7 +94,7 @@ export function exposeApi(
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 				} = args;
-				return await ctx.runMutation(component.lib.ensureSite, {
+				return await ctx.runMutation(component.sites.ensureSite, {
 					slug,
 					name,
 					allowedOrigins,
@@ -132,7 +132,7 @@ export function exposeApi(
 					type: "admin",
 					siteId: args.siteId,
 				});
-				return await ctx.runMutation(component.lib.updateSite, args);
+				return await ctx.runMutation(component.sites.updateSite, args);
 			},
 		}),
 		rotateWriteKey: mutationGeneric({
@@ -145,7 +145,7 @@ export function exposeApi(
 					type: "admin",
 					siteId: args.siteId,
 				});
-				return await ctx.runMutation(component.lib.rotateWriteKey, {
+				return await ctx.runMutation(component.sites.rotateWriteKey, {
 					siteId: args.siteId,
 					writeKeyHash: await hashWriteKey(args.writeKey),
 				});
@@ -162,21 +162,21 @@ export function exposeApi(
 					type: "admin",
 					siteId: args.siteId,
 				});
-				return await ctx.runMutation(component.lib.aggregatePending, args);
+				return await ctx.runMutation(component.ingest.aggregatePending, args);
 			},
 		}),
 		getSiteBySlug: queryGeneric({
 			args: { slug: v.string() },
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "admin" });
-				return await ctx.runQuery(component.lib.getSiteBySlug, args);
+				return await ctx.runQuery(component.sites.getSiteBySlug, args);
 			},
 		}),
 		getOverview: queryGeneric({
 			args: { siteId: v.string(), from: v.number(), to: v.number() },
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getOverview, args);
+				return await ctx.runQuery(component.analytics.getOverview, args);
 			},
 		}),
 		getTimeseries: queryGeneric({
@@ -188,7 +188,7 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getTimeseries, args);
+				return await ctx.runQuery(component.analytics.getTimeseries, args);
 			},
 		}),
 		getTopPages: queryGeneric({
@@ -200,7 +200,7 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getTopPages, args);
+				return await ctx.runQuery(component.analytics.getTopPages, args);
 			},
 		}),
 		getTopReferrers: queryGeneric({
@@ -212,7 +212,7 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getTopReferrers, args);
+				return await ctx.runQuery(component.analytics.getTopReferrers, args);
 			},
 		}),
 		getTopCampaigns: queryGeneric({
@@ -224,7 +224,7 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getTopCampaigns, args);
+				return await ctx.runQuery(component.analytics.getTopCampaigns, args);
 			},
 		}),
 		getTopEvents: queryGeneric({
@@ -236,7 +236,7 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.getTopEvents, args);
+				return await ctx.runQuery(component.analytics.getTopEvents, args);
 			},
 		}),
 		listRawEvents: queryGeneric({
@@ -248,14 +248,14 @@ export function exposeApi(
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.listRawEvents, args);
+				return await ctx.runQuery(component.analytics.listRawEvents, args);
 			},
 		}),
 		listSessions: queryGeneric({
 			args: { siteId: v.string(), limit: v.optional(v.number()) },
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
-				return await ctx.runQuery(component.lib.listSessions, args);
+				return await ctx.runQuery(component.analytics.listSessions, args);
 			},
 		}),
 	};

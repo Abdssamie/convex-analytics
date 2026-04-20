@@ -13,7 +13,6 @@ import type * as constants from "../constants.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as ingest from "../ingest.js";
-import type * as lib from "../lib.js";
 import type * as maintenance from "../maintenance.js";
 import type * as sites from "../sites.js";
 import type * as types from "../types.js";
@@ -31,7 +30,6 @@ const fullApi: ApiFromModules<{
   helpers: typeof helpers;
   http: typeof http;
   ingest: typeof ingest;
-  lib: typeof lib;
   maintenance: typeof maintenance;
   sites: typeof sites;
   types: typeof types;

@@ -123,3 +123,28 @@ export const topRowValidator = v.object({
 });
 
 export type IdOfSite = Id<"sites">;
+
+
+export type SiteSettingsArgs = {
+	sessionTimeoutMs?: number;
+	retentionDays?: number;
+	rawEventRetentionDays?: number;
+	pageViewRetentionDays?: number;
+	hourlyRollupRetentionDays?: number;
+	dailyRollupRetentionDays?: number;
+	dedupeRetentionMs?: number;
+	allowedPropertyKeys?: string[];
+	deniedPropertyKeys?: string[];
+};
+
+export type SiteSettings = {
+	sessionTimeoutMs: number;
+	retentionDays: number;
+	rawEventRetentionDays?: number;
+	pageViewRetentionDays?: number;
+	hourlyRollupRetentionDays?: number;
+	dailyRollupRetentionDays?: number;
+	dedupeRetentionMs?: number;
+	allowedPropertyKeys?: string[];
+	deniedPropertyKeys?: string[];
+};

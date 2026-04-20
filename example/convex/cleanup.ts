@@ -12,7 +12,7 @@ export const site = internalMutation({
   },
   handler: async (ctx, args) => {
     return await ctx.runMutation(
-      components.convexAnalytics.lib.cleanupSite,
+      components.convexAnalytics.maintenance.cleanupSite,
       args,
     );
   },
@@ -25,7 +25,7 @@ export const dedupes = internalMutation({
   },
   handler: async (ctx, args) => {
     return await ctx.runMutation(
-      components.convexAnalytics.lib.pruneExpired,
+      components.convexAnalytics.maintenance.pruneExpired,
       args,
     );
   },

@@ -1,4 +1,4 @@
-import type { SiteSettings, SiteSettingsArgs } from "../types";
+import type { SiteSettings, SiteSettingsArgs } from "./types";
 import {
 	defaultSettings,
 	dayMs,

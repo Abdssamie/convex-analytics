@@ -1,7 +1,16 @@
 import { mutation } from "./_generated/server.js";
 import { components } from "./_generated/api.js";
-import { exposeApi, hashWriteKey } from "@Abdssamie/convex-analytics";
+import { exposeApi } from "@Abdssamie/convex-analytics";
 import { v } from "convex/values";
+
+async function hashWriteKey(writeKey: string) {
+	const bytes = new TextEncoder().encode(writeKey);
+	const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+	return [...new Uint8Array(digest)]
+		.map((byte) => byte.toString(16).padStart(2, "0"))
+		.join("");
+}
+
 
 export const {
   createSite,
@@ -52,7 +61,7 @@ export const ingestExampleBatch = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(components.convexAnalytics.lib.ingestBatch, {
+    return await ctx.runMutation(components.convexAnalytics.ingest.ingestBatch, {
       writeKeyHash: await hashWriteKey(args.writeKey),
       origin: args.origin,
       visitorId: args.visitorId,

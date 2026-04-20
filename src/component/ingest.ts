@@ -218,7 +218,7 @@ export const ingestBatch = mutation({
 			traits: latestIdentifyTraits(args.events) ?? visitor.traits,
 		});
 		if (insertedEventIds.length > 0) {
-			await ctx.scheduler.runAfter(0, internal.lib.aggregateEventBatch, {
+			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
 				eventIds: insertedEventIds,
 			});
 		}
@@ -266,7 +266,7 @@ export const aggregatePending = mutation({
 				? { aggregated: 0, skipped: 0 }
 				: await aggregateEventsByIds(ctx, eventIds);
 		if (rows.length > limit) {
-			await ctx.scheduler.runAfter(0, api.lib.aggregatePending, {
+			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
 				siteId: args.siteId,
 				now: args.now,
 				limit,

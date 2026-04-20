@@ -99,7 +99,7 @@ export const cleanupSite = mutation({
 			hourlyRollupShards === perCategoryLimit ||
 			dailyRollupShards === perCategoryLimit;
 		if (hasMore && args.runUntilComplete) {
-			await ctx.scheduler.runAfter(0, api.lib.cleanupSite, {
+			await ctx.scheduler.runAfter(0, api.maintenance.cleanupSite, {
 				siteId: site._id,
 				now,
 				limit,

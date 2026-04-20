@@ -119,7 +119,7 @@ export async function ingestFromHttp(
 		throw new Error("writeKey or writeKeyHash is required");
 	}
 
-	return await ctx.runMutation(component.lib.ingestBatch, {
+	return await ctx.runMutation(component.ingest.ingestBatch, {
 		writeKeyHash,
 		origin: args.origin,
 		visitorId: args.visitorId,
@@ -157,7 +157,7 @@ export async function ensureConfiguredSite(
 		return;
 	}
 
-	await ctx.runMutation(component.lib.ensureSite, {
+	await ctx.runMutation(component.sites.ensureSite, {
 		slug: site.slug,
 		name: site.name,
 		writeKeyHash,
