@@ -31,14 +31,38 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         { aggregated: number; remaining: number; skipped: number },
         Name
       >;
+      cleanupSite: FunctionReference<
+        "mutation",
+        "internal",
+        {
+          limit?: number;
+          now?: number;
+          runUntilComplete?: boolean;
+          siteId?: string;
+          slug?: string;
+        },
+        {
+          dailyRollupShards: number;
+          events: number;
+          hasMore: boolean;
+          hourlyRollupShards: number;
+          pageViews: number;
+        },
+        Name
+      >;
       createSite: FunctionReference<
         "mutation",
         "internal",
         {
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
+          dailyRollupRetentionDays?: number;
+          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
+          hourlyRollupRetentionDays?: number;
           name: string;
+          pageViewRetentionDays?: number;
+          rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;
           slug: string;
@@ -53,8 +77,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
+          dailyRollupRetentionDays?: number;
+          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
+          hourlyRollupRetentionDays?: number;
           name: string;
+          pageViewRetentionDays?: number;
+          rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;
           slug: string;
@@ -89,7 +118,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name: string;
           settings: {
             allowedPropertyKeys?: Array<string>;
+            dailyRollupRetentionDays?: number;
+            dedupeRetentionMs?: number;
             deniedPropertyKeys?: Array<string>;
+            hourlyRollupRetentionDays?: number;
+            pageViewRetentionDays?: number;
+            rawEventRetentionDays?: number;
             retentionDays: number;
             sessionTimeoutMs: number;
           };
@@ -257,8 +291,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
+          dailyRollupRetentionDays?: number;
+          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
+          hourlyRollupRetentionDays?: number;
           name?: string;
+          pageViewRetentionDays?: number;
+          rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;
           siteId: string;

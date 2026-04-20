@@ -76,6 +76,12 @@ registerRoutes(http, components.convexAnalytics, {
       name: "Default site",
       writeKey: process.env.ANALYTICS_WRITE_KEY!,
       allowedOrigins: ["https://example.com"],
+      retentionDays: 90,
+      rawEventRetentionDays: 90,
+      pageViewRetentionDays: 90,
+      hourlyRollupRetentionDays: 90,
+      // Omit dailyRollupRetentionDays to keep daily rollups indefinitely.
+      dedupeRetentionMs: 24 * 60 * 60 * 1000,
     },
   ],
 });
@@ -137,6 +143,102 @@ export const {
 });
 ```
 
+## Retention
+
+Retention is configured per site. Defaults are cost-conscious:
+
+- raw `events`: 90 days
+- `pageViews`: 90 days
+- hourly `rollupShards`: 90 days
+- daily `rollupShards`: kept indefinitely
+- `ingestDedupes`: 24 hours from insertion
+
+`retentionDays` is the shared default for raw events, pageviews, and hourly
+rollups. Override the specific fields when needed:
+
+```ts
+registerRoutes(http, components.convexAnalytics, {
+  path: "/analytics/ingest",
+  sites: [
+    {
+      slug: "default",
+      name: "Default site",
+      writeKey: process.env.ANALYTICS_WRITE_KEY!,
+      rawEventRetentionDays: 30,
+      pageViewRetentionDays: 30,
+      hourlyRollupRetentionDays: 14,
+      dailyRollupRetentionDays: 730,
+      dedupeRetentionMs: 6 * 60 * 60 * 1000,
+    },
+  ],
+});
+```
+
+Cleanup is explicit so you control request volume and billing. A small scheduled
+cron is enough for most apps. Keep cleanup functions internal:
+
+```ts
+// convex/cleanup.ts
+import { components } from "./_generated/api";
+import { internalMutation } from "./_generated/server";
+import { v } from "convex/values";
+
+export const site = internalMutation({
+  args: {
+    slug: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.runMutation(components.convexAnalytics.lib.cleanupSite, {
+      slug: args.slug,
+      limit: args.limit,
+    });
+  },
+});
+
+export const dedupes = internalMutation({
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    return await ctx.runMutation(
+      components.convexAnalytics.lib.pruneExpired,
+      args,
+    );
+  },
+});
+```
+
+Then schedule them:
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+
+const crons = cronJobs();
+
+crons.interval(
+  "analytics cleanup",
+  { hours: 6 },
+  internal.cleanup.site,
+  { slug: "default", limit: 100 },
+);
+
+crons.interval(
+  "analytics dedupe cleanup",
+  { hours: 6 },
+  internal.cleanup.dedupes,
+  { limit: 100 },
+);
+
+export default crons;
+```
+
+The cron functions should be internal app mutations. Do not expose cleanup to
+browser clients.
+
+Use `runUntilComplete: true` only for one-off backfills or after downtime. For
+normal production cron, keep it unset and let each run delete a bounded batch.
+
 ## Browser SDK
 
 Use the browser helper in your frontend:
@@ -176,6 +278,7 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Ingest does not patch report counters inline.
 - Reports use sharded hourly/daily rollups for common analytics queries.
 - `aggregatePending` can repair missed pending events after deploys or failures.
+- Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.
 

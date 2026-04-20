@@ -29,6 +29,11 @@ type SiteConfig = {
   allowedOrigins?: string[];
   sessionTimeoutMs?: number;
   retentionDays?: number;
+  rawEventRetentionDays?: number;
+  pageViewRetentionDays?: number;
+  hourlyRollupRetentionDays?: number;
+  dailyRollupRetentionDays?: number;
+  dedupeRetentionMs?: number;
   allowedPropertyKeys?: string[];
   deniedPropertyKeys?: string[];
 };
@@ -51,6 +56,11 @@ export function exposeApi(
         allowedOrigins: v.optional(v.array(v.string())),
         sessionTimeoutMs: v.optional(v.number()),
         retentionDays: v.optional(v.number()),
+        rawEventRetentionDays: v.optional(v.number()),
+        pageViewRetentionDays: v.optional(v.number()),
+        hourlyRollupRetentionDays: v.optional(v.number()),
+        dailyRollupRetentionDays: v.optional(v.number()),
+        dedupeRetentionMs: v.optional(v.number()),
         allowedPropertyKeys: v.optional(v.array(v.string())),
         deniedPropertyKeys: v.optional(v.array(v.string())),
       },
@@ -63,6 +73,11 @@ export function exposeApi(
           allowedOrigins,
           sessionTimeoutMs,
           retentionDays,
+          rawEventRetentionDays,
+          pageViewRetentionDays,
+          hourlyRollupRetentionDays,
+          dailyRollupRetentionDays,
+          dedupeRetentionMs,
           allowedPropertyKeys,
           deniedPropertyKeys,
         } = args;
@@ -72,6 +87,11 @@ export function exposeApi(
           allowedOrigins,
           sessionTimeoutMs,
           retentionDays,
+          rawEventRetentionDays,
+          pageViewRetentionDays,
+          hourlyRollupRetentionDays,
+          dailyRollupRetentionDays,
+          dedupeRetentionMs,
           allowedPropertyKeys,
           deniedPropertyKeys,
           writeKeyHash: await hashWriteKey(writeKey),
@@ -86,6 +106,11 @@ export function exposeApi(
         allowedOrigins: v.optional(v.array(v.string())),
         sessionTimeoutMs: v.optional(v.number()),
         retentionDays: v.optional(v.number()),
+        rawEventRetentionDays: v.optional(v.number()),
+        pageViewRetentionDays: v.optional(v.number()),
+        hourlyRollupRetentionDays: v.optional(v.number()),
+        dailyRollupRetentionDays: v.optional(v.number()),
+        dedupeRetentionMs: v.optional(v.number()),
         allowedPropertyKeys: v.optional(v.array(v.string())),
         deniedPropertyKeys: v.optional(v.array(v.string())),
       },
@@ -98,6 +123,11 @@ export function exposeApi(
           allowedOrigins,
           sessionTimeoutMs,
           retentionDays,
+          rawEventRetentionDays,
+          pageViewRetentionDays,
+          hourlyRollupRetentionDays,
+          dailyRollupRetentionDays,
+          dedupeRetentionMs,
           allowedPropertyKeys,
           deniedPropertyKeys,
         } = args;
@@ -107,6 +137,11 @@ export function exposeApi(
           allowedOrigins,
           sessionTimeoutMs,
           retentionDays,
+          rawEventRetentionDays,
+          pageViewRetentionDays,
+          hourlyRollupRetentionDays,
+          dailyRollupRetentionDays,
+          dedupeRetentionMs,
           allowedPropertyKeys,
           deniedPropertyKeys,
           writeKeyHash: await hashWriteKey(writeKey),
@@ -121,6 +156,11 @@ export function exposeApi(
         allowedOrigins: v.optional(v.array(v.string())),
         sessionTimeoutMs: v.optional(v.number()),
         retentionDays: v.optional(v.number()),
+        rawEventRetentionDays: v.optional(v.number()),
+        pageViewRetentionDays: v.optional(v.number()),
+        hourlyRollupRetentionDays: v.optional(v.number()),
+        dailyRollupRetentionDays: v.optional(v.number()),
+        dedupeRetentionMs: v.optional(v.number()),
         allowedPropertyKeys: v.optional(v.array(v.string())),
         deniedPropertyKeys: v.optional(v.array(v.string())),
       },
@@ -384,6 +424,11 @@ async function ensureConfiguredSite(
     allowedOrigins: site.allowedOrigins,
     sessionTimeoutMs: site.sessionTimeoutMs,
     retentionDays: site.retentionDays,
+    rawEventRetentionDays: site.rawEventRetentionDays,
+    pageViewRetentionDays: site.pageViewRetentionDays,
+    hourlyRollupRetentionDays: site.hourlyRollupRetentionDays,
+    dailyRollupRetentionDays: site.dailyRollupRetentionDays,
+    dedupeRetentionMs: site.dedupeRetentionMs,
     allowedPropertyKeys: site.allowedPropertyKeys,
     deniedPropertyKeys: site.deniedPropertyKeys,
   });

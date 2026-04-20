@@ -48,6 +48,11 @@ const siteValidator = v.object({
   settings: v.object({
     sessionTimeoutMs: v.number(),
     retentionDays: v.number(),
+    rawEventRetentionDays: v.optional(v.number()),
+    pageViewRetentionDays: v.optional(v.number()),
+    hourlyRollupRetentionDays: v.optional(v.number()),
+    dailyRollupRetentionDays: v.optional(v.number()),
+    dedupeRetentionMs: v.optional(v.number()),
     allowedPropertyKeys: v.optional(v.array(v.string())),
     deniedPropertyKeys: v.optional(v.array(v.string())),
   }),
@@ -123,15 +128,19 @@ const topRowValidator = v.object({
 const defaultSettings = {
   sessionTimeoutMs: 30 * 60 * 1000,
   retentionDays: 90,
+  rawEventRetentionDays: 90,
+  pageViewRetentionDays: 90,
+  hourlyRollupRetentionDays: 90,
+  dedupeRetentionMs: 24 * 60 * 60 * 1000,
 };
 
 const hourMs = 60 * 60 * 1000;
 const dayMs = 24 * hourMs;
-const dedupeTtlMs = 24 * hourMs;
 const maxBatchSize = 50;
 const maxPropertyKeys = 32;
 const rollupShardCount = 16;
 const aggregationBatchLimit = 100;
+const cleanupBatchLimit = 100;
 
 export const createSite = mutation({
   args: {
@@ -141,6 +150,11 @@ export const createSite = mutation({
     allowedOrigins: v.optional(v.array(v.string())),
     sessionTimeoutMs: v.optional(v.number()),
     retentionDays: v.optional(v.number()),
+    rawEventRetentionDays: v.optional(v.number()),
+    pageViewRetentionDays: v.optional(v.number()),
+    hourlyRollupRetentionDays: v.optional(v.number()),
+    dailyRollupRetentionDays: v.optional(v.number()),
+    dedupeRetentionMs: v.optional(v.number()),
     allowedPropertyKeys: v.optional(v.array(v.string())),
     deniedPropertyKeys: v.optional(v.array(v.string())),
   },
@@ -160,13 +174,7 @@ export const createSite = mutation({
       status: "active",
       writeKeyHash: args.writeKeyHash,
       allowedOrigins: args.allowedOrigins ?? [],
-      settings: {
-        sessionTimeoutMs:
-          args.sessionTimeoutMs ?? defaultSettings.sessionTimeoutMs,
-        retentionDays: args.retentionDays ?? defaultSettings.retentionDays,
-        allowedPropertyKeys: args.allowedPropertyKeys,
-        deniedPropertyKeys: args.deniedPropertyKeys,
-      },
+      settings: siteSettingsFromArgs(args),
       createdAt: now,
       updatedAt: now,
     });
@@ -181,6 +189,11 @@ export const ensureSite = mutation({
     allowedOrigins: v.optional(v.array(v.string())),
     sessionTimeoutMs: v.optional(v.number()),
     retentionDays: v.optional(v.number()),
+    rawEventRetentionDays: v.optional(v.number()),
+    pageViewRetentionDays: v.optional(v.number()),
+    hourlyRollupRetentionDays: v.optional(v.number()),
+    dailyRollupRetentionDays: v.optional(v.number()),
+    dedupeRetentionMs: v.optional(v.number()),
     allowedPropertyKeys: v.optional(v.array(v.string())),
     deniedPropertyKeys: v.optional(v.array(v.string())),
   },
@@ -198,42 +211,19 @@ export const ensureSite = mutation({
         status: "active",
         writeKeyHash: args.writeKeyHash,
         allowedOrigins: args.allowedOrigins ?? [],
-        settings: {
-          sessionTimeoutMs:
-            args.sessionTimeoutMs ?? defaultSettings.sessionTimeoutMs,
-          retentionDays: args.retentionDays ?? defaultSettings.retentionDays,
-          allowedPropertyKeys: args.allowedPropertyKeys,
-          deniedPropertyKeys: args.deniedPropertyKeys,
-        },
+        settings: siteSettingsFromArgs(args),
         createdAt: now,
         updatedAt: now,
       });
     }
     const nextAllowedOrigins = args.allowedOrigins ?? existing.allowedOrigins;
-    const nextSettings = {
-      sessionTimeoutMs:
-        args.sessionTimeoutMs ?? existing.settings.sessionTimeoutMs,
-      retentionDays: args.retentionDays ?? existing.settings.retentionDays,
-      allowedPropertyKeys:
-        args.allowedPropertyKeys ?? existing.settings.allowedPropertyKeys,
-      deniedPropertyKeys:
-        args.deniedPropertyKeys ?? existing.settings.deniedPropertyKeys,
-    };
+    const nextSettings = siteSettingsFromArgs(args, existing.settings);
     if (
       existing.name === args.name &&
       existing.status === "active" &&
       existing.writeKeyHash === args.writeKeyHash &&
       sameStringArray(existing.allowedOrigins, nextAllowedOrigins) &&
-      existing.settings.sessionTimeoutMs === nextSettings.sessionTimeoutMs &&
-      existing.settings.retentionDays === nextSettings.retentionDays &&
-      sameOptionalStringArray(
-        existing.settings.allowedPropertyKeys,
-        nextSettings.allowedPropertyKeys,
-      ) &&
-      sameOptionalStringArray(
-        existing.settings.deniedPropertyKeys,
-        nextSettings.deniedPropertyKeys,
-      )
+      sameSiteSettings(existing.settings, nextSettings)
     ) {
       return existing._id;
     }
@@ -257,6 +247,11 @@ export const updateSite = mutation({
     allowedOrigins: v.optional(v.array(v.string())),
     sessionTimeoutMs: v.optional(v.number()),
     retentionDays: v.optional(v.number()),
+    rawEventRetentionDays: v.optional(v.number()),
+    pageViewRetentionDays: v.optional(v.number()),
+    hourlyRollupRetentionDays: v.optional(v.number()),
+    dailyRollupRetentionDays: v.optional(v.number()),
+    dedupeRetentionMs: v.optional(v.number()),
     allowedPropertyKeys: v.optional(v.array(v.string())),
     deniedPropertyKeys: v.optional(v.array(v.string())),
   },
@@ -270,15 +265,7 @@ export const updateSite = mutation({
       name: args.name ?? site.name,
       status: args.status ?? site.status,
       allowedOrigins: args.allowedOrigins ?? site.allowedOrigins,
-      settings: {
-        sessionTimeoutMs:
-          args.sessionTimeoutMs ?? site.settings.sessionTimeoutMs,
-        retentionDays: args.retentionDays ?? site.settings.retentionDays,
-        allowedPropertyKeys:
-          args.allowedPropertyKeys ?? site.settings.allowedPropertyKeys,
-        deniedPropertyKeys:
-          args.deniedPropertyKeys ?? site.settings.deniedPropertyKeys,
-      },
+      settings: siteSettingsFromArgs(args, site.settings),
       updatedAt: Date.now(),
     });
     return null;
@@ -429,7 +416,10 @@ export const ingestBatch = mutation({
         await ctx.db.insert("ingestDedupes", {
           siteId: site._id,
           dedupeKey,
-          expiresAt: receivedAt + dedupeTtlMs,
+          expiresAt:
+            receivedAt +
+            (site.settings.dedupeRetentionMs ??
+              defaultSettings.dedupeRetentionMs),
         });
       }
 
@@ -686,6 +676,96 @@ export const pruneExpired = mutation({
   },
 });
 
+export const cleanupSite = mutation({
+  args: {
+    siteId: v.optional(v.id("sites")),
+    slug: v.optional(v.string()),
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+    runUntilComplete: v.optional(v.boolean()),
+  },
+  returns: v.object({
+    events: v.number(),
+    pageViews: v.number(),
+    hourlyRollupShards: v.number(),
+    dailyRollupShards: v.number(),
+    hasMore: v.boolean(),
+  }),
+  handler: async (ctx, args) => {
+    const site = await resolveSite(ctx, args);
+    const now = args.now ?? Date.now();
+    const limit = Math.min(args.limit ?? cleanupBatchLimit, 500);
+    const rawEventCutoff =
+      now -
+      daysToMs(
+        site.settings.rawEventRetentionDays ?? site.settings.retentionDays,
+      );
+    const pageViewCutoff =
+      now -
+      daysToMs(
+        site.settings.pageViewRetentionDays ?? site.settings.retentionDays,
+      );
+    const hourlyRollupCutoff =
+      now -
+      daysToMs(
+        site.settings.hourlyRollupRetentionDays ?? site.settings.retentionDays,
+      );
+    const dailyRollupCutoff =
+      site.settings.dailyRollupRetentionDays === undefined
+        ? null
+        : now - daysToMs(site.settings.dailyRollupRetentionDays);
+    const activeCategories = dailyRollupCutoff === null ? 3 : 4;
+    const perCategoryLimit = Math.max(1, Math.floor(limit / activeCategories));
+
+    const events = await deleteDoneEventsBefore(ctx, {
+      siteId: site._id,
+      cutoff: rawEventCutoff,
+      limit: perCategoryLimit,
+    });
+    const pageViews = await deletePageViewsBefore(ctx, {
+      siteId: site._id,
+      cutoff: pageViewCutoff,
+      limit: perCategoryLimit,
+    });
+    const hourlyRollupShards = await deleteRollupShardsBefore(ctx, {
+      siteId: site._id,
+      interval: "hour",
+      cutoff: hourlyRollupCutoff,
+      limit: perCategoryLimit,
+    });
+    const dailyRollupShards =
+      dailyRollupCutoff === null
+        ? 0
+        : await deleteRollupShardsBefore(ctx, {
+            siteId: site._id,
+            interval: "day",
+            cutoff: dailyRollupCutoff,
+            limit: perCategoryLimit,
+          });
+
+    const hasMore =
+      events === perCategoryLimit ||
+      pageViews === perCategoryLimit ||
+      hourlyRollupShards === perCategoryLimit ||
+      dailyRollupShards === perCategoryLimit;
+    if (hasMore && args.runUntilComplete) {
+      await ctx.scheduler.runAfter(0, api.lib.cleanupSite, {
+        siteId: site._id,
+        now,
+        limit,
+        runUntilComplete: true,
+      });
+    }
+    return {
+      events,
+      pageViews,
+      hourlyRollupShards,
+      dailyRollupShards,
+      hasMore,
+    };
+  },
+});
+
 export const aggregateEventBatch = internalMutation({
   args: {
     eventIds: v.array(v.id("events")),
@@ -790,6 +870,94 @@ async function aggregateEventsByIds(
   return { aggregated, skipped };
 }
 
+async function resolveSite(
+  ctx: MutationCtx,
+  args: { siteId?: Id<"sites">; slug?: string },
+) {
+  if (args.siteId) {
+    const site = await ctx.db.get(args.siteId);
+    if (!site) {
+      throw new Error("Site not found");
+    }
+    return site;
+  }
+  if (args.slug) {
+    const site = await ctx.db
+      .query("sites")
+      .withIndex("by_slug", (q) => q.eq("slug", args.slug!))
+      .unique();
+    if (!site) {
+      throw new Error("Site not found");
+    }
+    return site;
+  }
+  throw new Error("siteId or slug is required");
+}
+
+async function deleteDoneEventsBefore(
+  ctx: MutationCtx,
+  args: { siteId: IdOfSite; cutoff: number; limit: number },
+) {
+  const rows = await ctx.db
+    .query("events")
+    .withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .eq("aggregationStatus", "done")
+        .lt("occurredAt", args.cutoff),
+    )
+    .take(args.limit);
+  await deleteRows(ctx, rows);
+  return rows.length;
+}
+
+async function deletePageViewsBefore(
+  ctx: MutationCtx,
+  args: { siteId: IdOfSite; cutoff: number; limit: number },
+) {
+  const rows = await ctx.db
+    .query("pageViews")
+    .withIndex("by_siteId_and_occurredAt", (q) =>
+      q.eq("siteId", args.siteId).lt("occurredAt", args.cutoff),
+    )
+    .take(args.limit);
+  await deleteRows(ctx, rows);
+  return rows.length;
+}
+
+async function deleteRollupShardsBefore(
+  ctx: MutationCtx,
+  args: {
+    siteId: IdOfSite;
+    interval: "hour" | "day";
+    cutoff: number;
+    limit: number;
+  },
+) {
+  const rows = await ctx.db
+    .query("rollupShards")
+    .withIndex("by_site_interval_bucket", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .eq("interval", args.interval)
+        .lt("bucketStart", args.cutoff),
+    )
+    .take(args.limit);
+  await deleteRows(ctx, rows);
+  return rows.length;
+}
+
+async function deleteRows(
+  ctx: MutationCtx,
+  rows: Array<{
+    _id: Id<"events"> | Id<"pageViews"> | Id<"rollupShards">;
+  }>,
+) {
+  for (const row of rows) {
+    await ctx.db.delete(row._id);
+  }
+}
+
 async function upsertVisitor(
   ctx: MutationCtx,
   args: {
@@ -818,6 +986,87 @@ async function upsertVisitor(
 }
 
 type IdOfSite = Id<"sites">;
+
+type SiteSettings = {
+  sessionTimeoutMs: number;
+  retentionDays: number;
+  rawEventRetentionDays?: number;
+  pageViewRetentionDays?: number;
+  hourlyRollupRetentionDays?: number;
+  dailyRollupRetentionDays?: number;
+  dedupeRetentionMs?: number;
+  allowedPropertyKeys?: string[];
+  deniedPropertyKeys?: string[];
+};
+
+type SiteSettingsArgs = {
+  sessionTimeoutMs?: number;
+  retentionDays?: number;
+  rawEventRetentionDays?: number;
+  pageViewRetentionDays?: number;
+  hourlyRollupRetentionDays?: number;
+  dailyRollupRetentionDays?: number;
+  dedupeRetentionMs?: number;
+  allowedPropertyKeys?: string[];
+  deniedPropertyKeys?: string[];
+};
+
+function siteSettingsFromArgs(
+  args: SiteSettingsArgs,
+  existing?: SiteSettings,
+): SiteSettings {
+  const retentionDays =
+    args.retentionDays ??
+    existing?.retentionDays ??
+    defaultSettings.retentionDays;
+  return {
+    sessionTimeoutMs:
+      args.sessionTimeoutMs ??
+      existing?.sessionTimeoutMs ??
+      defaultSettings.sessionTimeoutMs,
+    retentionDays,
+    rawEventRetentionDays:
+      args.rawEventRetentionDays ??
+      existing?.rawEventRetentionDays ??
+      retentionDays,
+    pageViewRetentionDays:
+      args.pageViewRetentionDays ??
+      existing?.pageViewRetentionDays ??
+      retentionDays,
+    hourlyRollupRetentionDays:
+      args.hourlyRollupRetentionDays ??
+      existing?.hourlyRollupRetentionDays ??
+      retentionDays,
+    dailyRollupRetentionDays:
+      args.dailyRollupRetentionDays ?? existing?.dailyRollupRetentionDays,
+    dedupeRetentionMs:
+      args.dedupeRetentionMs ??
+      existing?.dedupeRetentionMs ??
+      defaultSettings.dedupeRetentionMs,
+    allowedPropertyKeys:
+      args.allowedPropertyKeys ?? existing?.allowedPropertyKeys,
+    deniedPropertyKeys:
+      args.deniedPropertyKeys ?? existing?.deniedPropertyKeys,
+  };
+}
+
+function sameSiteSettings(left: SiteSettings, right: SiteSettings) {
+  return (
+    left.sessionTimeoutMs === right.sessionTimeoutMs &&
+    left.retentionDays === right.retentionDays &&
+    left.rawEventRetentionDays === right.rawEventRetentionDays &&
+    left.pageViewRetentionDays === right.pageViewRetentionDays &&
+    left.hourlyRollupRetentionDays === right.hourlyRollupRetentionDays &&
+    left.dailyRollupRetentionDays === right.dailyRollupRetentionDays &&
+    left.dedupeRetentionMs === right.dedupeRetentionMs &&
+    sameOptionalStringArray(left.allowedPropertyKeys, right.allowedPropertyKeys) &&
+    sameOptionalStringArray(left.deniedPropertyKeys, right.deniedPropertyKeys)
+  );
+}
+
+function daysToMs(days: number) {
+  return days * dayMs;
+}
 
 function normalizeEventName(event: {
   type: "pageview" | "track" | "identify";

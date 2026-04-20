@@ -13,6 +13,11 @@ export default defineSchema({
     settings: v.object({
       sessionTimeoutMs: v.number(),
       retentionDays: v.number(),
+      rawEventRetentionDays: v.optional(v.number()),
+      pageViewRetentionDays: v.optional(v.number()),
+      hourlyRollupRetentionDays: v.optional(v.number()),
+      dailyRollupRetentionDays: v.optional(v.number()),
+      dedupeRetentionMs: v.optional(v.number()),
       allowedPropertyKeys: v.optional(v.array(v.string())),
       deniedPropertyKeys: v.optional(v.array(v.string())),
     }),
@@ -163,6 +168,11 @@ export default defineSchema({
       "siteId",
       "interval",
       "dimension",
+      "bucketStart",
+    ])
+    .index("by_site_interval_bucket", [
+      "siteId",
+      "interval",
       "bucketStart",
     ]),
 

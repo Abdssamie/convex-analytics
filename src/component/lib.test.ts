@@ -97,4 +97,52 @@ describe("component lib", () => {
       duplicate: 1,
     });
   });
+
+  test("cleans expired raw rows while keeping daily reports", async () => {
+    const t = initConvexTest();
+    const siteId = await t.mutation(api.lib.createSite, {
+      slug: "default",
+      name: "Default site",
+      writeKeyHash: "test-hash",
+      retentionDays: 1,
+    });
+    const occurredAt = Date.UTC(2026, 0, 1, 12);
+    await t.mutation(api.lib.ingestBatch, {
+      writeKeyHash: "test-hash",
+      visitorId: "visitor-1",
+      sessionId: "session-1",
+      events: [
+        {
+          type: "pageview",
+          occurredAt,
+          path: "/old",
+          eventId: "old-event",
+        },
+      ],
+    });
+    await t.mutation(api.lib.aggregatePending, {
+      siteId,
+      now: occurredAt + 1000,
+    });
+
+    const cleanup = await t.mutation(api.lib.cleanupSite, {
+      siteId,
+      now: occurredAt + 3 * 24 * 60 * 60 * 1000,
+      limit: 40,
+    });
+
+    expect(cleanup.events).toBe(1);
+    expect(cleanup.pageViews).toBe(1);
+    expect(cleanup.hourlyRollupShards).toBeGreaterThan(0);
+    expect(cleanup.dailyRollupShards).toBe(0);
+    expect(cleanup.hasMore).toBe(false);
+    expect(await t.query(api.lib.listRawEvents, { siteId })).toHaveLength(0);
+    await expect(
+      t.query(api.lib.getOverview, {
+        siteId,
+        from: occurredAt - 1000,
+        to: occurredAt + 24 * 60 * 60 * 1000,
+      }),
+    ).resolves.toMatchObject({ pageviews: 1 });
+  });
 });
