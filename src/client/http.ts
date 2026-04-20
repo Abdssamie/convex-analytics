@@ -71,6 +71,22 @@ export function registerRoutes(
 						origin,
 					);
 				}
+				await ctx.runMutation(component.sites.ensureSite, {
+					slug: configuredSite.slug,
+					name: configuredSite.name,
+					writeKeyHash,
+					allowedOrigins: configuredSite.allowedOrigins,
+					sessionTimeoutMs: configuredSite.sessionTimeoutMs,
+					retentionDays: configuredSite.retentionDays,
+					rawEventRetentionDays: configuredSite.rawEventRetentionDays,
+					hourlyRollupRetentionDays:
+						configuredSite.hourlyRollupRetentionDays,
+					dailyRollupRetentionDays:
+						configuredSite.dailyRollupRetentionDays,
+					dedupeRetentionMs: configuredSite.dedupeRetentionMs,
+					allowedPropertyKeys: configuredSite.allowedPropertyKeys,
+					deniedPropertyKeys: configuredSite.deniedPropertyKeys,
+				});
 			}
 			const body = await request.json();
 			const result = await ingestFromHttp(ctx, component, {
@@ -135,4 +151,3 @@ export async function findConfiguredSite(
 
 	return null;
 }
-

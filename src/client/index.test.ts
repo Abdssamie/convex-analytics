@@ -1,20 +1,24 @@
 import { anyApi, type ApiFromModules } from "convex/server";
 import { describe, expect, test } from "vitest";
 import { components, initConvexTest } from "./setup.test.js";
-import { exposeApi } from "./index.js";
+import { exposeAdminApi, exposeAnalyticsApi } from "./index.js";
 
-export const { createSite, getSiteBySlug } = exposeApi(
+export const { createSite, getSiteBySlug } = exposeAdminApi(
 	components.convexAnalytics,
 	{
 		auth: async () => {},
 	},
 );
+export const { getOverview } = exposeAnalyticsApi(components.convexAnalytics, {
+	auth: async () => {},
+});
 
 const testApi = (
 	anyApi as unknown as ApiFromModules<{
 		"index.test": {
 			createSite: typeof createSite;
 			getSiteBySlug: typeof getSiteBySlug;
+			getOverview: typeof getOverview;
 		};
 	}>
 )["index.test"];
@@ -34,5 +38,12 @@ describe("client helpers", () => {
 		});
 		expect(site?.name).toBe("Default site");
 		expect(site?.writeKeyHash).not.toBe("write_test");
+
+		const overview = await t.query(testApi.getOverview, {
+			siteId,
+			from: 0,
+			to: Date.now(),
+		});
+		expect(overview.events).toBe(0);
 	});
 });

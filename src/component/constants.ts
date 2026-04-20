@@ -2,7 +2,6 @@ export const defaultSettings = {
 	sessionTimeoutMs: 30 * 60 * 1000,
 	retentionDays: 90,
 	rawEventRetentionDays: 90,
-	pageViewRetentionDays: 90,
 	hourlyRollupRetentionDays: 90,
 	dedupeRetentionMs: 24 * 60 * 60 * 1000,
 };
@@ -12,4 +11,6 @@ export const maxBatchSize = 50;
 export const maxPropertyKeys = 32;
 export const rollupShardCount = 16;
 export const aggregationBatchLimit = 100;
+export const aggregationRetryDelayMs = 5_000;
+export const maxAggregationAttempts = 3;
 export const cleanupBatchLimit = 100;

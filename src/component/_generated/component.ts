@@ -65,6 +65,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
+      getTopMediums: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
       getTopPages: FunctionReference<
         "query",
         "internal",
@@ -79,67 +86,110 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
+      getTopSources: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
       listRawEvents: FunctionReference<
         "query",
         "internal",
-        { from?: number; limit?: number; siteId: string; to?: number },
-        Array<{
-          _creationTime: number;
-          _id: string;
-          aggregatedAt?: number;
-          aggregationAttempts?: number;
-          aggregationError?: string;
-          aggregationStatus?: "pending" | "done" | "failed";
-          contributesSession?: boolean;
-          contributesVisitor?: boolean;
-          dedupeKey?: string;
-          eventName: string;
-          eventType: "pageview" | "track" | "identify";
-          identifiedUserId?: string;
-          occurredAt: number;
-          path?: string;
-          properties?: Record<string, string | number | boolean | null>;
-          receivedAt: number;
-          referrer?: string;
-          sessionId: string;
+        {
+          from?: number;
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
           siteId: string;
-          source?: string;
-          title?: string;
-          utmCampaign?: string;
-          utmMedium?: string;
-          utmSource?: string;
-          visitorId: string;
-        }>,
+          to?: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          page: Array<{
+            _creationTime: number;
+            _id: string;
+            aggregatedAt?: number;
+            aggregationAttempts?: number;
+            aggregationError?: string;
+            aggregationStatus?: "pending" | "done" | "failed";
+            contributesSession?: boolean;
+            contributesVisitor?: boolean;
+            dedupeKey?: string;
+            eventName: string;
+            eventType: "pageview" | "track" | "identify";
+            identifiedUserId?: string;
+            occurredAt: number;
+            path?: string;
+            properties?: Record<string, string | number | boolean | null>;
+            receivedAt: number;
+            referrer?: string;
+            sessionId: string;
+            siteId: string;
+            source?: string;
+            title?: string;
+            utmCampaign?: string;
+            utmMedium?: string;
+            utmSource?: string;
+            visitorId: string;
+          }>;
+          pageStatus?: string | null;
+          splitCursor?: string | null;
+        },
         Name
       >;
       listSessions: FunctionReference<
         "query",
         "internal",
-        { limit?: number; siteId: string },
-        Array<{
-          _creationTime: number;
-          _id: string;
-          bounce: boolean;
-          browser?: string;
-          country?: string;
-          device?: string;
-          durationMs: number;
-          entryPath?: string;
-          eventCount: number;
-          exitPath?: string;
-          identifiedUserId?: string;
-          lastSeenAt: number;
-          os?: string;
-          pageviewCount: number;
-          referrer?: string;
-          sessionId: string;
+        {
+          from?: number;
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
           siteId: string;
-          startedAt: number;
-          utmCampaign?: string;
-          utmMedium?: string;
-          utmSource?: string;
-          visitorId: string;
-        }>,
+          to?: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          page: Array<{
+            _creationTime: number;
+            _id: string;
+            bounce: boolean;
+            browser?: string;
+            country?: string;
+            device?: string;
+            durationMs: number;
+            entryPath?: string;
+            eventCount: number;
+            exitPath?: string;
+            identifiedUserId?: string;
+            lastSeenAt: number;
+            os?: string;
+            pageviewCount: number;
+            referrer?: string;
+            sessionId: string;
+            siteId: string;
+            startedAt: number;
+            utmCampaign?: string;
+            utmMedium?: string;
+            utmSource?: string;
+            visitorId: string;
+          }>;
+          pageStatus?: string | null;
+          splitCursor?: string | null;
+        },
         Name
       >;
     };
@@ -148,7 +198,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "mutation",
         "internal",
         { limit?: number; now?: number; siteId: string },
-        { aggregated: number; remaining: number; skipped: number },
+        {
+          aggregated: number;
+          failed: number;
+          remaining: number;
+          skipped: number;
+        },
         Name
       >;
       ingestBatch: FunctionReference<
@@ -184,6 +239,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         { accepted: number; duplicate: number; rejected: number },
         Name
       >;
+      retryFailedEvents: FunctionReference<
+        "mutation",
+        "internal",
+        { limit?: number; runUntilComplete?: boolean; siteId: string },
+        { hasMore: boolean; requeued: number },
+        Name
+      >;
     };
     maintenance: {
       cleanupSite: FunctionReference<
@@ -201,8 +263,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           events: number;
           hasMore: boolean;
           hourlyRollupShards: number;
-          pageViews: number;
         },
+        Name
+      >;
+      pruneExpired: FunctionReference<
+        "mutation",
+        "internal",
+        { limit?: number; now?: number },
+        number,
         Name
       >;
     };
@@ -218,7 +286,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name: string;
-          pageViewRetentionDays?: number;
           rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;
@@ -239,7 +306,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name: string;
-          pageViewRetentionDays?: number;
           rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;
@@ -265,7 +331,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             dedupeRetentionMs?: number;
             deniedPropertyKeys?: Array<string>;
             hourlyRollupRetentionDays?: number;
-            pageViewRetentionDays?: number;
             rawEventRetentionDays?: number;
             retentionDays: number;
             sessionTimeoutMs: number;
@@ -295,7 +360,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name?: string;
-          pageViewRetentionDays?: number;
           rawEventRetentionDays?: number;
           retentionDays?: number;
           sessionTimeoutMs?: number;

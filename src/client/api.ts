@@ -1,8 +1,71 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component";
 import type { AuthFn } from "./types";
 import { hashWriteKey } from "./helpers";
+
+export function exposeAnalyticsApi(
+	component: ComponentApi,
+	options: {
+		auth: AuthFn;
+	},
+) {
+	const {
+		getOverview,
+		getTimeseries,
+		getTopPages,
+		getTopReferrers,
+		getTopSources,
+		getTopMediums,
+		getTopCampaigns,
+		getTopEvents,
+		listRawEvents,
+		listSessions,
+	} = exposeApi(component, options);
+	return {
+		getOverview,
+		getTimeseries,
+		getTopPages,
+		getTopReferrers,
+		getTopSources,
+		getTopMediums,
+		getTopCampaigns,
+		getTopEvents,
+		listRawEvents,
+		listSessions,
+	};
+}
+
+export function exposeAdminApi(
+	component: ComponentApi,
+	options: {
+		auth: AuthFn;
+	},
+) {
+	const {
+		createSite,
+		ensureSite,
+		updateSite,
+		rotateWriteKey,
+		aggregatePending,
+		retryFailedEvents,
+		getSiteBySlug,
+		cleanupSite,
+		pruneExpired,
+	} = exposeApi(component, options);
+	return {
+		createSite,
+		ensureSite,
+		updateSite,
+		rotateWriteKey,
+		aggregatePending,
+		retryFailedEvents,
+		getSiteBySlug,
+		cleanupSite,
+		pruneExpired,
+	};
+}
 
 export function exposeApi(
 	component: ComponentApi,
@@ -20,7 +83,6 @@ export function exposeApi(
 				sessionTimeoutMs: v.optional(v.number()),
 				retentionDays: v.optional(v.number()),
 				rawEventRetentionDays: v.optional(v.number()),
-				pageViewRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
@@ -37,7 +99,6 @@ export function exposeApi(
 					sessionTimeoutMs,
 					retentionDays,
 					rawEventRetentionDays,
-					pageViewRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
@@ -51,7 +112,6 @@ export function exposeApi(
 					sessionTimeoutMs,
 					retentionDays,
 					rawEventRetentionDays,
-					pageViewRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
@@ -70,7 +130,6 @@ export function exposeApi(
 				sessionTimeoutMs: v.optional(v.number()),
 				retentionDays: v.optional(v.number()),
 				rawEventRetentionDays: v.optional(v.number()),
-				pageViewRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
@@ -87,7 +146,6 @@ export function exposeApi(
 					sessionTimeoutMs,
 					retentionDays,
 					rawEventRetentionDays,
-					pageViewRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
@@ -101,7 +159,6 @@ export function exposeApi(
 					sessionTimeoutMs,
 					retentionDays,
 					rawEventRetentionDays,
-					pageViewRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
@@ -120,7 +177,6 @@ export function exposeApi(
 				sessionTimeoutMs: v.optional(v.number()),
 				retentionDays: v.optional(v.number()),
 				rawEventRetentionDays: v.optional(v.number()),
-				pageViewRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
@@ -163,6 +219,20 @@ export function exposeApi(
 					siteId: args.siteId,
 				});
 				return await ctx.runMutation(component.ingest.aggregatePending, args);
+			},
+		}),
+		retryFailedEvents: mutationGeneric({
+			args: {
+				siteId: v.string(),
+				limit: v.optional(v.number()),
+				runUntilComplete: v.optional(v.boolean()),
+			},
+			handler: async (ctx, args) => {
+				await options.auth(ctx, {
+					type: "admin",
+					siteId: args.siteId,
+				});
+				return await ctx.runMutation(component.ingest.retryFailedEvents, args);
 			},
 		}),
 		getSiteBySlug: queryGeneric({
@@ -215,6 +285,30 @@ export function exposeApi(
 				return await ctx.runQuery(component.analytics.getTopReferrers, args);
 			},
 		}),
+		getTopSources: queryGeneric({
+			args: {
+				siteId: v.string(),
+				from: v.number(),
+				to: v.number(),
+				limit: v.optional(v.number()),
+			},
+			handler: async (ctx, args) => {
+				await options.auth(ctx, { type: "read", siteId: args.siteId });
+				return await ctx.runQuery(component.analytics.getTopSources, args);
+			},
+		}),
+		getTopMediums: queryGeneric({
+			args: {
+				siteId: v.string(),
+				from: v.number(),
+				to: v.number(),
+				limit: v.optional(v.number()),
+			},
+			handler: async (ctx, args) => {
+				await options.auth(ctx, { type: "read", siteId: args.siteId });
+				return await ctx.runQuery(component.analytics.getTopMediums, args);
+			},
+		}),
 		getTopCampaigns: queryGeneric({
 			args: {
 				siteId: v.string(),
@@ -244,7 +338,7 @@ export function exposeApi(
 				siteId: v.string(),
 				from: v.optional(v.number()),
 				to: v.optional(v.number()),
-				limit: v.optional(v.number()),
+				paginationOpts: paginationOptsValidator,
 			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
@@ -252,10 +346,41 @@ export function exposeApi(
 			},
 		}),
 		listSessions: queryGeneric({
-			args: { siteId: v.string(), limit: v.optional(v.number()) },
+			args: {
+				siteId: v.string(),
+				from: v.optional(v.number()),
+				to: v.optional(v.number()),
+				paginationOpts: paginationOptsValidator,
+			},
 			handler: async (ctx, args) => {
 				await options.auth(ctx, { type: "read", siteId: args.siteId });
 				return await ctx.runQuery(component.analytics.listSessions, args);
+			},
+		}),
+		cleanupSite: mutationGeneric({
+			args: {
+				siteId: v.optional(v.string()),
+				slug: v.optional(v.string()),
+				now: v.optional(v.number()),
+				limit: v.optional(v.number()),
+				runUntilComplete: v.optional(v.boolean()),
+			},
+			handler: async (ctx, args) => {
+				await options.auth(ctx, {
+					type: "admin",
+					siteId: args.siteId,
+				});
+				return await ctx.runMutation(component.maintenance.cleanupSite, args);
+			},
+		}),
+		pruneExpired: mutationGeneric({
+			args: {
+				now: v.optional(v.number()),
+				limit: v.optional(v.number()),
+			},
+			handler: async (ctx, args) => {
+				await options.auth(ctx, { type: "admin" });
+				return await ctx.runMutation(component.maintenance.pruneExpired, args);
 			},
 		}),
 	};

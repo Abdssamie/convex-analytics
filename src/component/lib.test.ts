@@ -39,28 +39,39 @@ async function countSiteRows(
 			.query("sessions")
 			.withIndex("by_siteId_and_startedAt", (q) => q.eq("siteId", siteId))
 			.take(500);
-			const pendingEvents = await ctx.db
-				.query("events")
+		const pendingEvents = await ctx.db
+			.query("events")
 			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q.eq("siteId", siteId).eq("aggregationStatus", "pending").lte("occurredAt", now),
+				q
+					.eq("siteId", siteId)
+					.eq("aggregationStatus", "pending")
+					.lte("occurredAt", now),
 			)
 			.take(500);
 		const doneEvents = await ctx.db
 			.query("events")
 			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q.eq("siteId", siteId).eq("aggregationStatus", "done").lte("occurredAt", now),
+				q
+					.eq("siteId", siteId)
+					.eq("aggregationStatus", "done")
+					.lte("occurredAt", now),
 			)
 			.take(500);
-			const pageViews = await ctx.db
-				.query("pageViews")
-				.withIndex("by_siteId_and_occurredAt", (q) => q.eq("siteId", siteId))
-				.take(500);
+		const failedEvents = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+				q
+					.eq("siteId", siteId)
+					.eq("aggregationStatus", "failed")
+					.lte("occurredAt", now),
+			)
+			.take(500);
 		return {
 			visitors,
 			sessions,
 			pendingEvents,
 			doneEvents,
-			pageViews,
+			failedEvents,
 		};
 	});
 }
@@ -127,7 +138,7 @@ async function insertPendingPageviewEvents(
 }
 
 describe("realistic ingestion, sharding, and compaction flows", () => {
-	test("scheduled worker materializes visitors, sessions, pageviews, and rollups after append-only ingest", async () => {
+	test("scheduled worker materializes visitors, sessions, and rollups after append-only ingest", async () => {
 		vi.useFakeTimers();
 		try {
 		const { t, siteId, writeKeyHash } = await createSite();
@@ -228,7 +239,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(before.visitors).toHaveLength(0);
 		expect(before.sessions).toHaveLength(0);
 		expect(before.pendingEvents).toHaveLength(8);
-		expect(before.pageViews).toHaveLength(0);
 
 		await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
@@ -237,7 +247,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(after.doneEvents).toHaveLength(8);
 		expect(after.visitors).toHaveLength(2);
 		expect(after.sessions).toHaveLength(3);
-		expect(after.pageViews).toHaveLength(4);
 
 		const visitorOne = after.visitors.find((row) => row.visitorId === "visitor-1");
 		expect(visitorOne).toMatchObject({
@@ -318,12 +327,87 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			siteId,
 			from: base - 1,
 			to: base + dayMs,
-			limit: 20,
+			paginationOpts: {
+				numItems: 20,
+				cursor: null,
+			},
 		});
-		expect(rawEvents).toHaveLength(8);
-		expect(rawEvents.every((row) => row.aggregationStatus === "done")).toBe(true);
-		expect(rawEvents.filter((row) => row.contributesVisitor)).toHaveLength(2);
-		expect(rawEvents.filter((row) => row.contributesSession)).toHaveLength(3);
+		expect(rawEvents.page).toHaveLength(8);
+		expect(rawEvents.isDone).toBe(true);
+		expect(
+			rawEvents.page.every(
+				(row: { aggregationStatus?: string }) => row.aggregationStatus === "done",
+			),
+		).toBe(
+			true,
+		);
+		expect(
+			rawEvents.page.filter(
+				(row: { contributesVisitor?: boolean }) => row.contributesVisitor,
+			),
+		).toHaveLength(2);
+		expect(
+			rawEvents.page.filter(
+				(row: { contributesSession?: boolean }) => row.contributesSession,
+			),
+		).toHaveLength(3);
+
+		const rawEventsPageOne = await t.query(api.analytics.listRawEvents, {
+			siteId,
+			from: base - 1,
+			to: base + dayMs,
+			paginationOpts: {
+				numItems: 3,
+				cursor: null,
+			},
+		});
+		expect(rawEventsPageOne.page).toHaveLength(3);
+		expect(rawEventsPageOne.isDone).toBe(false);
+		const rawEventsPageTwo = await t.query(api.analytics.listRawEvents, {
+			siteId,
+			from: base - 1,
+			to: base + dayMs,
+			paginationOpts: {
+				numItems: 3,
+				cursor: rawEventsPageOne.continueCursor,
+			},
+		});
+		expect(rawEventsPageTwo.page).toHaveLength(3);
+
+		const partialOverview = await t.query(api.analytics.getOverview, {
+			siteId,
+			from: base + 30_000,
+			to: base + 6 * 60_000 + 30_000,
+		});
+		expect(partialOverview).toMatchObject({
+			events: 4,
+			pageviews: 2,
+			sessions: 1,
+			visitors: 1,
+		});
+
+		const partialTopEvents = await t.query(api.analytics.getTopEvents, {
+			siteId,
+			from: base + 30_000,
+			to: base + 6 * 60_000 + 30_000,
+			limit: 10,
+		});
+		expect(partialTopEvents).toEqual([
+			{ key: "pageview", count: 2, pageviewCount: 2 },
+			{ key: "signup_click", count: 1, pageviewCount: 0 },
+			{ key: "identify", count: 1, pageviewCount: 0 },
+		]);
+
+		const partialTopSources = await t.query(api.analytics.getTopSources, {
+			siteId,
+			from: base + 30_000,
+			to: base + 6 * 60_000 + 30_000,
+			limit: 10,
+		});
+		expect(partialTopSources).toEqual([
+			{ key: "newsletter", count: 2, pageviewCount: 0 },
+			{ key: "ads", count: 2, pageviewCount: 2 },
+		]);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -371,7 +455,15 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			to: oldHour + hourMs,
 			interval: "hour",
 		});
-		expect(timeseriesBefore.length).toBeGreaterThan(1);
+		expect(timeseriesBefore).toEqual([
+			{
+				bucketStart: oldHour,
+				events: totalEvents,
+				pageviews: totalEvents,
+				sessions: totalEvents,
+				visitors: totalEvents,
+			},
+		]);
 		const timeseriesBeforeTotals = timeseriesBefore.reduce(
 			(sum, row) => ({
 				events: sum.events + row.events,
@@ -565,7 +657,15 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				visitors: 3,
 			},
 		]);
-		expect(recentRows.length).toBeGreaterThan(1);
+		expect(recentRows).toEqual([
+			{
+				bucketStart: recentHour,
+				events: 24,
+				pageviews: 24,
+				sessions: 3,
+				visitors: 3,
+			},
+		]);
 	});
 
 	test("reused sessionId after timeout creates new session row instead of colliding", async () => {
@@ -605,26 +705,113 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 
 		const sessions = await t.query(api.analytics.listSessions, {
 			siteId,
-			limit: 10,
+			paginationOpts: {
+				numItems: 10,
+				cursor: null,
+			},
 		});
-		expect(sessions).toHaveLength(2);
-		expect(sessions.map((row) => row.sessionId)).toEqual([
+		expect(sessions.page).toHaveLength(2);
+		expect(sessions.isDone).toBe(true);
+		expect(
+			sessions.page.map((row: { sessionId: string }) => row.sessionId),
+		).toEqual([
 			"shared-session",
 			"shared-session",
 		]);
-		expect(sessions[0]).toMatchObject({
+		expect(sessions.page[0]).toMatchObject({
 			startedAt: now + 120_000,
 			entryPath: "/pricing",
 			exitPath: "/pricing",
 			pageviewCount: 1,
 			eventCount: 1,
 		});
-		expect(sessions[1]).toMatchObject({
+		expect(sessions.page[1]).toMatchObject({
 			startedAt: now,
 			entryPath: "/",
 			exitPath: "/",
 			pageviewCount: 1,
 			eventCount: 1,
 		});
+	});
+
+	test("failed aggregations retry with backoff, then stay failed until manual requeue", async () => {
+		vi.useFakeTimers();
+		try {
+			const { t, siteId } = await createSite();
+			const now = Date.UTC(2026, 0, 12, 12, 0, 0);
+			const eventId = await t.run(async (ctx) => {
+				const orphanSiteId = await ctx.db.insert("sites", {
+					slug: "orphan-site",
+					name: "Orphan",
+					status: "active",
+					writeKeyHash: "orphan",
+					allowedOrigins: [],
+						settings: {
+							sessionTimeoutMs: 30 * 60 * 1000,
+							retentionDays: 90,
+							rawEventRetentionDays: 90,
+							hourlyRollupRetentionDays: 90,
+							dedupeRetentionMs: 24 * 60 * 60 * 1000,
+						},
+					createdAt: now,
+					updatedAt: now,
+				});
+				const id = await ctx.db.insert("events", {
+					siteId: orphanSiteId,
+					receivedAt: now,
+					occurredAt: now,
+					visitorId: "visitor-1",
+					sessionId: "session-1",
+					eventType: "pageview",
+					eventName: "pageview",
+					path: "/broken",
+					aggregationStatus: "pending",
+					aggregationAttempts: 0,
+				});
+				await ctx.db.delete(orphanSiteId);
+				return id;
+			});
+
+			await t.mutation(internal.ingest.aggregateEventBatch, {
+				eventIds: [eventId],
+			});
+			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+			const failedAfterRetries = await t.run(async (ctx) => {
+				return await ctx.db.get(eventId);
+			});
+			expect(failedAfterRetries).toMatchObject({
+				aggregationStatus: "failed",
+				aggregationAttempts: 3,
+				aggregationError: "Site not found",
+			});
+
+			await t.run(async (ctx) => {
+				await ctx.db.patch(eventId, {
+					siteId,
+					aggregationStatus: "failed",
+				});
+			});
+
+			const requeue = await t.mutation(api.ingest.retryFailedEvents, {
+				siteId,
+				limit: 10,
+			});
+			expect(requeue).toEqual({ requeued: 1, hasMore: false });
+
+			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+			const recovered = await t.run(async (ctx) => {
+				return await ctx.db.get(eventId);
+			});
+			expect(recovered).toMatchObject({
+				siteId,
+				aggregationStatus: "done",
+				aggregationAttempts: 4,
+				aggregationError: "",
+			});
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });

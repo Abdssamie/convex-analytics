@@ -1,4 +1,4 @@
-import { mutation, internalMutation } from "./_generated/server";
+import { mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
@@ -6,7 +6,7 @@ import type { IdOfSite } from "./types";
 import { cleanupBatchLimit } from "./constants";
 import { resolveSite, daysToMs, deleteRows } from "./helpers";
 
-export const pruneExpired = internalMutation({
+export const pruneExpired = mutation({
 	args: {
 		now: v.optional(v.number()),
 		limit: v.optional(v.number()),
@@ -36,7 +36,6 @@ export const cleanupSite = mutation({
 	},
 	returns: v.object({
 		events: v.number(),
-		pageViews: v.number(),
 		hourlyRollupShards: v.number(),
 		dailyRollupShards: v.number(),
 		hasMore: v.boolean(),
@@ -49,11 +48,6 @@ export const cleanupSite = mutation({
 			now -
 			daysToMs(
 				site.settings.rawEventRetentionDays ?? site.settings.retentionDays,
-			);
-		const pageViewCutoff =
-			now -
-			daysToMs(
-				site.settings.pageViewRetentionDays ?? site.settings.retentionDays,
 			);
 		const hourlyRollupCutoff =
 			now -
@@ -70,11 +64,6 @@ export const cleanupSite = mutation({
 		const events = await deleteDoneEventsBefore(ctx, {
 			siteId: site._id,
 			cutoff: rawEventCutoff,
-			limit: perCategoryLimit,
-		});
-		const pageViews = await deletePageViewsBefore(ctx, {
-			siteId: site._id,
-			cutoff: pageViewCutoff,
 			limit: perCategoryLimit,
 		});
 		const hourlyRollupShards = await deleteRollupShardsBefore(ctx, {
@@ -95,7 +84,6 @@ export const cleanupSite = mutation({
 
 		const hasMore =
 			events === perCategoryLimit ||
-			pageViews === perCategoryLimit ||
 			hourlyRollupShards === perCategoryLimit ||
 			dailyRollupShards === perCategoryLimit;
 		if (hasMore && args.runUntilComplete) {
@@ -108,7 +96,6 @@ export const cleanupSite = mutation({
 		}
 		return {
 			events,
-			pageViews,
 			hourlyRollupShards,
 			dailyRollupShards,
 			hasMore,
@@ -127,20 +114,6 @@ export async function deleteDoneEventsBefore(
 				.eq("siteId", args.siteId)
 				.eq("aggregationStatus", "done")
 				.lt("occurredAt", args.cutoff),
-		)
-		.take(args.limit);
-	await deleteRows(ctx, rows);
-	return rows.length;
-}
-
-export async function deletePageViewsBefore(
-	ctx: MutationCtx,
-	args: { siteId: IdOfSite; cutoff: number; limit: number },
-) {
-	const rows = await ctx.db
-		.query("pageViews")
-		.withIndex("by_siteId_and_occurredAt", (q) =>
-			q.eq("siteId", args.siteId).lt("occurredAt", args.cutoff),
 		)
 		.take(args.limit);
 	await deleteRows(ctx, rows);

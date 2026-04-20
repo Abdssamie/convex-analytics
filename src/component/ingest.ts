@@ -9,8 +9,10 @@ import {
 	maxBatchSize,
 	defaultSettings,
 	aggregationBatchLimit,
+	aggregationRetryDelayMs,
 	hourMs,
 	dayMs,
+	maxAggregationAttempts,
 } from "./constants";
 import {
 	normalizeEventName,
@@ -144,9 +146,22 @@ export const aggregateEventBatch = internalMutation({
 	returns: v.object({
 		aggregated: v.number(),
 		skipped: v.number(),
+		failed: v.number(),
 	}),
 	handler: async (ctx, args) => {
-		return await aggregateEventsByIds(ctx, args.eventIds);
+		const result = await aggregateEventsByIds(ctx, args.eventIds);
+		if (result.retriableEventIds.length > 0) {
+			await ctx.scheduler.runAfter(
+				aggregationRetryDelayMs,
+				internal.ingest.aggregateEventBatch,
+				{ eventIds: result.retriableEventIds },
+			);
+		}
+		return {
+			aggregated: result.aggregated,
+			skipped: result.skipped,
+			failed: result.failed,
+		};
 	},
 });
 export const aggregatePending = mutation({
@@ -158,6 +173,7 @@ export const aggregatePending = mutation({
 	returns: v.object({
 		aggregated: v.number(),
 		skipped: v.number(),
+		failed: v.number(),
 		remaining: v.number(),
 	}),
 	handler: async (ctx, args) => {
@@ -175,8 +191,20 @@ export const aggregatePending = mutation({
 		const eventIds = rows.slice(0, limit).map((row) => row._id);
 		const result =
 			eventIds.length === 0
-				? { aggregated: 0, skipped: 0 }
+				? {
+						aggregated: 0,
+						skipped: 0,
+						failed: 0,
+						retriableEventIds: [],
+					}
 				: await aggregateEventsByIds(ctx, eventIds);
+		if (result.retriableEventIds.length > 0) {
+			await ctx.scheduler.runAfter(
+				aggregationRetryDelayMs,
+				internal.ingest.aggregateEventBatch,
+				{ eventIds: result.retriableEventIds },
+			);
+		}
 		if (rows.length > limit) {
 			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
 				siteId: args.siteId,
@@ -196,7 +224,54 @@ export const aggregatePending = mutation({
 		return {
 			aggregated: result.aggregated,
 			skipped: result.skipped,
+			failed: result.failed,
 			remaining: Math.max(0, rows.length - limit),
+		};
+	},
+});
+
+export const retryFailedEvents = mutation({
+	args: {
+		siteId: v.id("sites"),
+		limit: v.optional(v.number()),
+		runUntilComplete: v.optional(v.boolean()),
+	},
+	returns: v.object({
+		requeued: v.number(),
+		hasMore: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
+		const rows = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+				q.eq("siteId", args.siteId).eq("aggregationStatus", "failed"),
+			)
+			.take(limit + 1);
+		const toRequeue = rows.slice(0, limit);
+		for (const row of toRequeue) {
+			await ctx.db.patch(row._id, {
+				aggregationStatus: "pending",
+				aggregationError: "",
+			});
+		}
+		const hasMore = rows.length > limit;
+		if (hasMore && args.runUntilComplete) {
+			await ctx.scheduler.runAfter(0, api.ingest.retryFailedEvents, {
+				siteId: args.siteId,
+				limit,
+				runUntilComplete: true,
+			});
+		}
+		if (toRequeue.length > 0) {
+			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
+				siteId: args.siteId,
+				limit,
+			});
+		}
+		return {
+			requeued: toRequeue.length,
+			hasMore,
 		};
 	},
 });
@@ -207,7 +282,9 @@ export async function aggregateEventsByIds(
 ) {
 	let aggregated = 0;
 	let skipped = 0;
+	let failed = 0;
 	const now = Date.now();
+	const retriableEventIds: Array<Id<"events">> = [];
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregationStatus === "done") {
@@ -256,20 +333,6 @@ export async function aggregateEventsByIds(
 				newVisitor: visitor.created,
 				shard: shardForEvent(event._id),
 			});
-			if (event.eventType === "pageview" && event.path) {
-				await ctx.db.insert("pageViews", {
-					siteId: event.siteId,
-					occurredAt: event.occurredAt,
-					visitorId: event.visitorId,
-					sessionId: event.sessionId,
-					path: event.path,
-					title: event.title,
-					referrer: event.referrer,
-					utmSource: event.utmSource,
-					utmMedium: event.utmMedium,
-					utmCampaign: event.utmCampaign,
-				});
-			}
 			await ctx.db.patch(event._id, {
 				contributesSession: session.created,
 				contributesVisitor: visitor.created,
@@ -280,17 +343,21 @@ export async function aggregateEventsByIds(
 			});
 			aggregated += 1;
 		} catch (error) {
+			const nextAttempts = (event.aggregationAttempts ?? 0) + 1;
 			await ctx.db.patch(event._id, {
 				aggregationStatus: "failed",
-				aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
+				aggregationAttempts: nextAttempts,
 				aggregationError:
 					error instanceof Error ? error.message : "Aggregation failed",
 			});
-			throw error;
+			if (nextAttempts < maxAggregationAttempts) {
+				retriableEventIds.push(event._id);
+			}
+			failed += 1;
 		}
 	}
 
-	return { aggregated, skipped };
+	return { aggregated, skipped, failed, retriableEventIds };
 }
 
 export async function upsertVisitor(

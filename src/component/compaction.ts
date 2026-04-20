@@ -7,12 +7,14 @@ import { dayMs, hourMs } from "./constants";
 import { sumRollups } from "./helpers";
 
 const compactionBucketBatchSize = 8;
+const compactionRowBatchSize = 10_000;
 
 export const compactShards = internalMutation({
 	args: {
 		siteId: v.id("sites"),
 		interval: v.union(v.literal("hour"), v.literal("day")),
 		now: v.optional(v.number()),
+		bucketStart: v.optional(v.number()),
 	},
 	returns: v.object({
 		compactedBuckets: v.number(),
@@ -22,6 +24,26 @@ export const compactShards = internalMutation({
 		const now = args.now ?? Date.now();
 		const threshold =
 			args.interval === "hour" ? now - 2 * hourMs : now - 2 * dayMs;
+		if (args.bucketStart !== undefined) {
+			const bucket = await compactBucket(ctx, {
+				siteId: args.siteId,
+				interval: args.interval,
+				bucketStart: args.bucketStart,
+				now,
+			});
+			if (bucket.hasMore) {
+				await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
+					siteId: args.siteId,
+					interval: args.interval,
+					now,
+					bucketStart: args.bucketStart,
+				});
+			}
+			return {
+				compactedBuckets: bucket.compacted ? 1 : 0,
+				hasMore: bucket.hasMore,
+			};
+		}
 		const bucketStarts: number[] = [];
 		let hasMore = false;
 		const query = ctx.db
@@ -45,12 +67,21 @@ export const compactShards = internalMutation({
 		}
 
 		for (const bucketStart of bucketStarts) {
-			await compactBucket(ctx, {
+			const bucket = await compactBucket(ctx, {
 				siteId: args.siteId,
 				interval: args.interval,
 				bucketStart,
 				now,
 			});
+			if (bucket.hasMore) {
+				hasMore = true;
+				await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
+					siteId: args.siteId,
+					interval: args.interval,
+					now,
+					bucketStart,
+				});
+			}
 		}
 
 		if (hasMore) {
@@ -82,7 +113,10 @@ async function compactBucket(
 				.eq("interval", args.interval)
 				.eq("bucketStart", args.bucketStart),
 		)
-		.take(10000);
+		.take(compactionRowBatchSize);
+	if (rows.length === 0) {
+		return { compacted: false, hasMore: false };
+	}
 	const groups = new Map<string, typeof rows>();
 	for (const row of rows) {
 		const key = `${row.dimension}\u0000${row.key}`;
@@ -128,4 +162,8 @@ async function compactBucket(
 			}
 		}
 	}
+	return {
+		compacted: true,
+		hasMore: rows.length === compactionRowBatchSize,
+	};
 }

@@ -26,10 +26,6 @@ export function siteSettingsFromArgs(
 			args.rawEventRetentionDays ??
 			existing?.rawEventRetentionDays ??
 			retentionDays,
-		pageViewRetentionDays:
-			args.pageViewRetentionDays ??
-			existing?.pageViewRetentionDays ??
-			retentionDays,
 		hourlyRollupRetentionDays:
 			args.hourlyRollupRetentionDays ??
 			existing?.hourlyRollupRetentionDays ??
@@ -51,7 +47,6 @@ export function sameSiteSettings(left: SiteSettings, right: SiteSettings) {
 		left.sessionTimeoutMs === right.sessionTimeoutMs &&
 		left.retentionDays === right.retentionDays &&
 		left.rawEventRetentionDays === right.rawEventRetentionDays &&
-		left.pageViewRetentionDays === right.pageViewRetentionDays &&
 		left.hourlyRollupRetentionDays === right.hourlyRollupRetentionDays &&
 		left.dailyRollupRetentionDays === right.dailyRollupRetentionDays &&
 		left.dedupeRetentionMs === right.dedupeRetentionMs &&
@@ -174,7 +169,7 @@ export function shardForEvent(eventId: Id<"events">) {
 export async function deleteRows(
 	ctx: MutationCtx,
 	rows: Array<{
-		_id: Id<"events"> | Id<"pageViews"> | Id<"rollupShards">;
+		_id: Id<"events"> | Id<"rollupShards">;
 	}>,
 ) {
 	for (const row of rows) {

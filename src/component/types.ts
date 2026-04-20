@@ -49,7 +49,6 @@ export const siteValidator = v.object({
 		sessionTimeoutMs: v.number(),
 		retentionDays: v.number(),
 		rawEventRetentionDays: v.optional(v.number()),
-		pageViewRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
 		dedupeRetentionMs: v.optional(v.number()),
@@ -121,6 +120,20 @@ export const topRowValidator = v.object({
 	count: v.number(),
 	pageviewCount: v.number(),
 });
+export const paginatedEventsValidator = v.object({
+	page: v.array(eventValidator),
+	isDone: v.boolean(),
+	continueCursor: v.union(v.string(), v.null()),
+	pageStatus: v.optional(v.union(v.string(), v.null())),
+	splitCursor: v.optional(v.union(v.string(), v.null())),
+});
+export const paginatedSessionsValidator = v.object({
+	page: v.array(sessionValidator),
+	isDone: v.boolean(),
+	continueCursor: v.union(v.string(), v.null()),
+	pageStatus: v.optional(v.union(v.string(), v.null())),
+	splitCursor: v.optional(v.union(v.string(), v.null())),
+});
 
 export type IdOfSite = Id<"sites">;
 
@@ -129,7 +142,6 @@ export type SiteSettingsArgs = {
 	sessionTimeoutMs?: number;
 	retentionDays?: number;
 	rawEventRetentionDays?: number;
-	pageViewRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
 	dedupeRetentionMs?: number;
@@ -141,7 +153,6 @@ export type SiteSettings = {
 	sessionTimeoutMs: number;
 	retentionDays: number;
 	rawEventRetentionDays?: number;
-	pageViewRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
 	dedupeRetentionMs?: number;
