@@ -10,9 +10,9 @@ const modules = import.meta.glob("./component/**/*.ts");
  * @param name - The name of the component, as registered in convex.config.ts.
  */
 export function register(
-  t: TestConvex<SchemaDefinition<GenericSchema, boolean>>,
-  name: string = "convexAnalytics",
+	t: TestConvex<SchemaDefinition<GenericSchema, boolean>>,
+	name: string = "convexAnalytics",
 ) {
-  t.registerComponent(name, schema, modules);
+	t.registerComponent(name, schema, modules);
 }
 export default { register, schema, modules };
