@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { api, internal } from "./_generated/api.js";
+import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
 import { dayMs, hourMs } from "./constants.js";
 import { floorToBucket } from "./helpers.js";
@@ -26,7 +27,7 @@ async function createSite(overrides?: {
 
 async function countSiteRows(
 	t: ReturnType<typeof initConvexTest>,
-	siteId: string,
+	siteId: Id<"sites">,
 	now: number,
 ) {
 	return await t.run(async (ctx) => {
@@ -38,8 +39,8 @@ async function countSiteRows(
 			.query("sessions")
 			.withIndex("by_siteId_and_startedAt", (q) => q.eq("siteId", siteId))
 			.take(500);
-		const pendingEvents = await ctx.db
-			.query("events")
+			const pendingEvents = await ctx.db
+				.query("events")
 			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
 				q.eq("siteId", siteId).eq("aggregationStatus", "pending").lte("occurredAt", now),
 			)
@@ -67,7 +68,7 @@ async function countSiteRows(
 async function getRollupBucketRows(
 	t: ReturnType<typeof initConvexTest>,
 	args: {
-		siteId: string;
+		siteId: Id<"sites">;
 		interval: "hour" | "day";
 		bucketStart: number;
 		dimension: string;
@@ -92,7 +93,7 @@ async function getRollupBucketRows(
 async function insertPendingPageviewEvents(
 	t: ReturnType<typeof initConvexTest>,
 	args: {
-		siteId: string;
+		siteId: Id<"sites">;
 		now: number;
 		bucketStart: number;
 		totalEvents: number;
@@ -102,7 +103,7 @@ async function insertPendingPageviewEvents(
 	},
 ) {
 	return await t.run(async (ctx) => {
-		const eventIds: string[] = [];
+		const eventIds: Array<Id<"events">> = [];
 		for (let index = 0; index < args.totalEvents; index += 1) {
 			const eventId = await ctx.db.insert("events", {
 				siteId: args.siteId,
@@ -394,12 +395,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			limit: 10,
 		});
 
-		await t.mutation(api.compaction.compactShards, {
+		await t.mutation(internal.compaction.compactShards, {
 			siteId,
 			interval: "hour",
 			now,
 		});
-		await t.mutation(api.compaction.compactShards, {
+		await t.mutation(internal.compaction.compactShards, {
 			siteId,
 			interval: "day",
 			now,
@@ -512,7 +513,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(oldRowsBefore.length).toBeGreaterThan(1);
 		expect(recentRowsBefore.length).toBeGreaterThan(1);
 
-		await t.mutation(api.compaction.compactShards, {
+		await t.mutation(internal.compaction.compactShards, {
 			siteId,
 			interval: "hour",
 			now,

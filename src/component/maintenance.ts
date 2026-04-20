@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { mutation, internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
@@ -6,7 +6,7 @@ import type { IdOfSite } from "./types";
 import { cleanupBatchLimit } from "./constants";
 import { resolveSite, daysToMs, deleteRows } from "./helpers";
 
-export const pruneExpired = mutation({
+export const pruneExpired = internalMutation({
 	args: {
 		now: v.optional(v.number()),
 		limit: v.optional(v.number()),

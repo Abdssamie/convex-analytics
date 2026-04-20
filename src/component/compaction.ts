@@ -1,14 +1,14 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { IdOfSite } from "./types";
 import { dayMs, hourMs } from "./constants";
 import { sumRollups } from "./helpers";
 
 const compactionBucketBatchSize = 8;
 
-export const compactShards = mutation({
+export const compactShards = internalMutation({
 	args: {
 		siteId: v.id("sites"),
 		interval: v.union(v.literal("hour"), v.literal("day")),
@@ -54,7 +54,7 @@ export const compactShards = mutation({
 		}
 
 		if (hasMore) {
-			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
 				siteId: args.siteId,
 				interval: args.interval,
 				now,

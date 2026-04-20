@@ -184,11 +184,11 @@ export const aggregatePending = mutation({
 				limit,
 			});
 		} else {
-			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
 				siteId: args.siteId,
 				interval: "hour",
 			});
-			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
 				siteId: args.siteId,
 				interval: "day",
 			});

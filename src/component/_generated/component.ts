@@ -143,15 +143,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
-    compaction: {
-      compactShards: FunctionReference<
-        "mutation",
-        "internal",
-        { interval: "hour" | "day"; now?: number; siteId: string },
-        { compactedBuckets: number; hasMore: boolean },
-        Name
-      >;
-    };
     ingest: {
       aggregatePending: FunctionReference<
         "mutation",
@@ -212,13 +203,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           hourlyRollupShards: number;
           pageViews: number;
         },
-        Name
-      >;
-      pruneExpired: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; now?: number },
-        number,
         Name
       >;
     };
