@@ -13,11 +13,8 @@ import {
 	dayMs,
 } from "./constants";
 import {
-	firstPagePath,
-	firstReferrer,
 	normalizeEventName,
 	sanitizeProperties,
-	latestIdentifyTraits,
 	floorToBucket,
 	shardForEvent,
 } from "./helpers";
@@ -62,58 +59,10 @@ export const ingestBatch = mutation({
 		}
 
 		const receivedAt = Date.now();
-		const firstOccurredAt = args.events[0]?.occurredAt ?? receivedAt;
-		const visitor = await upsertVisitor(ctx, {
-			siteId: site._id,
-			visitorId: args.visitorId,
-			seenAt: firstOccurredAt,
-		});
-
-		let session = await ctx.db
-			.query("sessions")
-			.withIndex("by_siteId_and_sessionId", (q) =>
-				q.eq("siteId", site._id).eq("sessionId", args.sessionId),
-			)
-			.unique();
-		let newSession = false;
-		if (
-			!session ||
-			firstOccurredAt - session.lastSeenAt > site.settings.sessionTimeoutMs
-		) {
-			const sessionDbId = await ctx.db.insert("sessions", {
-				siteId: site._id,
-				visitorId: args.visitorId,
-				sessionId: args.sessionId,
-				startedAt: firstOccurredAt,
-				lastSeenAt: firstOccurredAt,
-				entryPath: firstPagePath(args.events),
-				exitPath: firstPagePath(args.events),
-				referrer: firstReferrer(args.events),
-				utmSource: args.context?.utmSource,
-				utmMedium: args.context?.utmMedium,
-				utmCampaign: args.context?.utmCampaign,
-				device: args.context?.device,
-				browser: args.context?.browser,
-				os: args.context?.os,
-				country: args.context?.country,
-				identifiedUserId: visitor.identifiedUserId,
-				eventCount: 0,
-				pageviewCount: 0,
-				durationMs: 0,
-				bounce: true,
-			});
-			session = (await ctx.db.get(sessionDbId))!;
-			newSession = true;
-		}
-
 		let accepted = 0;
 		let duplicate = 0;
 		let rejected = 0;
-		let eventCount = 0;
-		let pageviewCount = 0;
-		let lastSeenAt = session.lastSeenAt;
-		let exitPath = session.exitPath;
-		let identifiedUserId = visitor.identifiedUserId;
+		let identifiedUserId: string | undefined;
 		const insertedEventIds: Array<Id<"events">> = [];
 
 		for (const event of args.events) {
@@ -151,9 +100,6 @@ export const ingestBatch = mutation({
 			if (event.type === "identify" && event.userId) {
 				identifiedUserId = event.userId;
 			}
-			const contributesSession = accepted === 0 && newSession;
-			const contributesVisitor =
-				visitor.firstSeenAt === visitor.lastSeenAt && accepted === 0;
 
 			const eventDbId = await ctx.db.insert("events", {
 				siteId: site._id,
@@ -173,8 +119,6 @@ export const ingestBatch = mutation({
 				properties,
 				identifiedUserId,
 				dedupeKey,
-				contributesVisitor,
-				contributesSession,
 				aggregationStatus: "pending",
 				aggregationAttempts: 0,
 			});
@@ -193,30 +137,11 @@ export const ingestBatch = mutation({
 					utmMedium: args.context?.utmMedium,
 					utmCampaign: args.context?.utmCampaign,
 				});
-				exitPath = event.path;
-				pageviewCount += 1;
 			}
 
 			accepted += 1;
-			eventCount += 1;
-			lastSeenAt = Math.max(lastSeenAt, occurredAt);
 		}
 
-		const durationMs = Math.max(0, lastSeenAt - session.startedAt);
-		await ctx.db.patch(session._id, {
-			lastSeenAt,
-			exitPath,
-			identifiedUserId,
-			eventCount: session.eventCount + eventCount,
-			pageviewCount: session.pageviewCount + pageviewCount,
-			durationMs,
-			bounce: session.pageviewCount + pageviewCount <= 1,
-		});
-		await ctx.db.patch(visitor._id, {
-			lastSeenAt,
-			identifiedUserId,
-			traits: latestIdentifyTraits(args.events) ?? visitor.traits,
-		});
 		if (insertedEventIds.length > 0) {
 			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
 				eventIds: insertedEventIds,
@@ -251,13 +176,14 @@ export const aggregatePending = mutation({
 	}),
 	handler: async (ctx, args) => {
 		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
+		const now = args.now ?? Date.now();
 		const rows = await ctx.db
 			.query("events")
 			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
 				q
 					.eq("siteId", args.siteId)
 					.eq("aggregationStatus", "pending")
-					.lte("occurredAt", args.now ?? Date.now()),
+					.lte("occurredAt", now),
 			)
 			.take(limit + 1);
 		const eventIds = rows.slice(0, limit).map((row) => row._id);
@@ -268,8 +194,17 @@ export const aggregatePending = mutation({
 		if (rows.length > limit) {
 			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
 				siteId: args.siteId,
-				now: args.now,
+				now,
 				limit,
+			});
+		} else {
+			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+				siteId: args.siteId,
+				interval: "hour",
+			});
+			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+				siteId: args.siteId,
+				interval: "day",
 			});
 		}
 		return {
@@ -294,6 +229,32 @@ export async function aggregateEventsByIds(
 			continue;
 		}
 		try {
+			const site = await ctx.db.get(event.siteId);
+			if (!site) {
+				throw new Error("Site not found");
+			}
+			const visitor = await upsertVisitor(ctx, {
+				siteId: event.siteId,
+				visitorId: event.visitorId,
+				seenAt: event.occurredAt,
+				identifiedUserId: event.identifiedUserId,
+				traits:
+					event.eventType === "identify" ? event.properties : undefined,
+			});
+			const session = await upsertSession(ctx, {
+				siteId: event.siteId,
+				sessionId: event.sessionId,
+				visitorId: event.visitorId,
+				occurredAt: event.occurredAt,
+				path: event.path,
+				referrer: event.referrer,
+				utmSource: event.utmSource,
+				utmMedium: event.utmMedium,
+				utmCampaign: event.utmCampaign,
+				identifiedUserId: event.identifiedUserId ?? visitor.identifiedUserId,
+				eventType: event.eventType,
+				sessionTimeoutMs: site.settings.sessionTimeoutMs,
+			});
 			await updateRollupShards(ctx, {
 				siteId: event.siteId,
 				occurredAt: event.occurredAt,
@@ -305,11 +266,13 @@ export async function aggregateEventsByIds(
 				utmMedium: event.utmMedium,
 				utmCampaign: event.utmCampaign,
 				receivedAt: now,
-				newSession: event.contributesSession ?? false,
-				newVisitor: event.contributesVisitor ?? false,
+				newSession: session.created,
+				newVisitor: visitor.created,
 				shard: shardForEvent(event._id),
 			});
 			await ctx.db.patch(event._id, {
+				contributesSession: session.created,
+				contributesVisitor: visitor.created,
 				aggregationStatus: "done",
 				aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
 				aggregationError: "",
@@ -336,6 +299,8 @@ export async function upsertVisitor(
 		siteId: IdOfSite;
 		visitorId: string;
 		seenAt: number;
+		identifiedUserId?: string;
+		traits?: Record<string, string | number | boolean | null>;
 	},
 ) {
 	const existing = await ctx.db
@@ -345,8 +310,16 @@ export async function upsertVisitor(
 		)
 		.unique();
 	if (existing) {
-		await ctx.db.patch(existing._id, { lastSeenAt: args.seenAt });
-		return existing;
+		const lastSeenAt = Math.max(existing.lastSeenAt, args.seenAt);
+		await ctx.db.patch(existing._id, {
+			lastSeenAt,
+			identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
+			traits: args.traits ?? existing.traits,
+		});
+		return {
+			...(await ctx.db.get(existing._id))!,
+			created: false,
+		};
 	}
 
 	const id = await ctx.db.insert("visitors", {
@@ -354,8 +327,96 @@ export async function upsertVisitor(
 		visitorId: args.visitorId,
 		firstSeenAt: args.seenAt,
 		lastSeenAt: args.seenAt,
+		identifiedUserId: args.identifiedUserId,
+		traits: args.traits,
 	});
-	return (await ctx.db.get(id))!;
+	return {
+		...(await ctx.db.get(id))!,
+		created: true,
+	};
+}
+
+export async function upsertSession(
+	ctx: MutationCtx,
+	args: {
+		siteId: IdOfSite;
+		sessionId: string;
+		visitorId: string;
+		occurredAt: number;
+		path?: string;
+		referrer?: string;
+		utmSource?: string;
+		utmMedium?: string;
+		utmCampaign?: string;
+		identifiedUserId?: string;
+		eventType: "pageview" | "track" | "identify";
+		sessionTimeoutMs: number;
+	},
+) {
+	const existing = await ctx.db
+		.query("sessions")
+		.withIndex("by_siteId_and_sessionId", (q) =>
+			q.eq("siteId", args.siteId).eq("sessionId", args.sessionId),
+		)
+		.unique();
+	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
+	const isNewSession =
+		!existing ||
+		args.occurredAt - existing.lastSeenAt > args.sessionTimeoutMs;
+	if (isNewSession) {
+		const id = await ctx.db.insert("sessions", {
+			siteId: args.siteId,
+			visitorId: args.visitorId,
+			sessionId: args.sessionId,
+			startedAt: args.occurredAt,
+			lastSeenAt: args.occurredAt,
+			entryPath: args.path,
+			exitPath: args.path,
+			referrer: args.referrer,
+			utmSource: args.utmSource,
+			utmMedium: args.utmMedium,
+			utmCampaign: args.utmCampaign,
+			identifiedUserId: args.identifiedUserId,
+			eventCount: 1,
+			pageviewCount: pageviewIncrement,
+			durationMs: 0,
+			bounce: pageviewIncrement <= 1,
+		});
+		return {
+			...(await ctx.db.get(id))!,
+			created: true,
+		};
+	}
+
+	const startedAt = Math.min(existing.startedAt, args.occurredAt);
+	const lastSeenAt = Math.max(existing.lastSeenAt, args.occurredAt);
+	const nextPageviewCount = existing.pageviewCount + pageviewIncrement;
+	await ctx.db.patch(existing._id, {
+		visitorId: args.visitorId,
+		startedAt,
+		lastSeenAt,
+		entryPath:
+			args.occurredAt < existing.startedAt && args.path
+				? args.path
+				: existing.entryPath,
+		exitPath:
+			args.path && args.occurredAt >= existing.lastSeenAt
+				? args.path
+				: existing.exitPath,
+		referrer: existing.referrer ?? args.referrer,
+		utmSource: existing.utmSource ?? args.utmSource,
+		utmMedium: existing.utmMedium ?? args.utmMedium,
+		utmCampaign: existing.utmCampaign ?? args.utmCampaign,
+		identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
+		eventCount: existing.eventCount + 1,
+		pageviewCount: nextPageviewCount,
+		durationMs: Math.max(0, lastSeenAt - startedAt),
+		bounce: nextPageviewCount <= 1,
+	});
+	return {
+		...(await ctx.db.get(existing._id))!,
+		created: false,
+	};
 }
 
 export async function updateRollupShards(

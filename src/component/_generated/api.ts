@@ -9,6 +9,7 @@
  */
 
 import type * as analytics from "../analytics.js";
+import type * as compaction from "../compaction.js";
 import type * as constants from "../constants.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
@@ -26,6 +27,7 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   analytics: typeof analytics;
+  compaction: typeof compaction;
   constants: typeof constants;
   helpers: typeof helpers;
   http: typeof http;
