@@ -1057,6 +1057,15 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				limit: 10,
 			});
 			expect(requeue).toEqual({ requeued: 1, hasMore: false });
+			const requeuedEvent = await t.run(async (ctx) => {
+				return await ctx.db.get(eventId);
+			});
+			expect(requeuedEvent).toMatchObject({
+				siteId,
+				aggregationStatus: "pending",
+				aggregationAttempts: 0,
+				aggregationError: "",
+			});
 
 			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
@@ -1066,7 +1075,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			expect(recovered).toMatchObject({
 				siteId,
 				aggregationStatus: "done",
-				aggregationAttempts: 4,
+				aggregationAttempts: 1,
 				aggregationError: "",
 			});
 		} finally {

@@ -253,6 +253,7 @@ export const retryFailedEvents = mutation({
 			await ctx.db.patch(row._id, {
 				aggregationStatus: "pending",
 				aggregationError: "",
+				aggregationAttempts: 0,
 			});
 		}
 		const hasMore = rows.length > limit;
