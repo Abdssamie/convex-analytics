@@ -400,6 +400,8 @@ async function queryTimeseries(
 			),
 		);
 	} else if (args.to !== lastBucketEnd && lastBucketStart === firstBucketStart) {
+		// A single partial bucket hits both edges. Re-run the exact [from, to)
+		// range so we replace the first-bucket clip above with the correct total.
 		byBucket.set(
 			lastBucketStart,
 			toTimeseriesRow(
