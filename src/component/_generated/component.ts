@@ -24,6 +24,20 @@ import type { FunctionReference } from "convex/server";
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
     analytics: {
+      getEventPropertyBreakdown: FunctionReference<
+        "query",
+        "internal",
+        {
+          eventName: string;
+          from: number;
+          limit?: number;
+          propertyKey: string;
+          siteId: string;
+          to: number;
+        },
+        Array<{ count: number; value: string | number | boolean | null }>,
+        Name
+      >;
       getOverview: FunctionReference<
         "query",
         "internal",

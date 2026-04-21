@@ -4,6 +4,7 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import {
 	topRowValidator,
+	propertyBreakdownRowValidator,
 	paginatedEventsValidator,
 	paginatedSessionsValidator,
 } from "./types.js";
@@ -140,6 +141,20 @@ export const getTopEvents = query({
 	returns: v.array(topRowValidator),
 	handler: async (ctx, args) => {
 		return await topDimension(ctx, args, "event", args.limit ?? 10);
+	},
+});
+export const getEventPropertyBreakdown = query({
+	args: {
+		siteId: v.id("sites"),
+		eventName: v.string(),
+		propertyKey: v.string(),
+		from: v.number(),
+		to: v.number(),
+		limit: v.optional(v.number()),
+	},
+	returns: v.array(propertyBreakdownRowValidator),
+	handler: async (ctx, args) => {
+		return await eventPropertyBreakdown(ctx, args);
 	},
 });
 export const listRawEvents = query({
@@ -281,6 +296,44 @@ export async function topDimension(
 		.map(([key, value]) => ({ key, ...value }))
 		.sort((left, right) => right.count - left.count)
 		.slice(0, Math.min(limit, 100));
+}
+
+async function eventPropertyBreakdown(
+	ctx: QueryCtx,
+	args: {
+		siteId: IdOfSite;
+		eventName: string;
+		propertyKey: string;
+		from: number;
+		to: number;
+		limit?: number;
+	},
+) {
+	if (args.from >= args.to) {
+		return [];
+	}
+	const rows = await queryRawEvents(ctx, {
+		siteId: args.siteId,
+		from: args.from,
+		to: args.to,
+	});
+	const byValue = new Map<string, { value: string | number | boolean | null; count: number }>();
+	for (const event of rows) {
+		if (event.eventName !== args.eventName) {
+			continue;
+		}
+		const value = event.properties?.[args.propertyKey];
+		if (value === undefined) {
+			continue;
+		}
+		const serialized = serializePropertyValue(value);
+		const current = byValue.get(serialized) ?? { value, count: 0 };
+		current.count += 1;
+		byValue.set(serialized, current);
+	}
+	return [...byValue.values()]
+		.sort((left, right) => right.count - left.count)
+		.slice(0, Math.min(args.limit ?? 10, 100));
 }
 
 async function queryTimeseries(
@@ -606,4 +659,8 @@ function addTopRows(
 		current.pageviewCount += row.pageviewCount;
 		byKey.set(row.key, current);
 	}
+}
+
+function serializePropertyValue(value: string | number | boolean | null) {
+	return value === null ? "null" : `${typeof value}:${String(value)}`;
 }

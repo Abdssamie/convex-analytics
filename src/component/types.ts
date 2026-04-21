@@ -120,6 +120,10 @@ export const topRowValidator = v.object({
 	count: v.number(),
 	pageviewCount: v.number(),
 });
+export const propertyBreakdownRowValidator = v.object({
+	value: propertyValue,
+	count: v.number(),
+});
 export const paginatedEventsValidator = v.object({
 	page: v.array(eventValidator),
 	isDone: v.boolean(),

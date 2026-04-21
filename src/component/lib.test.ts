@@ -421,6 +421,19 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			{ key: "search", count: 1, pageviewCount: 0 },
 		]);
 
+		const signupPlanBreakdown = await t.query(
+			api.analytics.getEventPropertyBreakdown,
+			{
+				siteId,
+				eventName: "signup_click",
+				propertyKey: "plan",
+				from: base - 1,
+				to: base + dayMs,
+				limit: 10,
+			},
+		);
+		expect(signupPlanBreakdown).toEqual([]);
+
 		const rawEvents = await t.query(api.analytics.listRawEvents, {
 			siteId,
 			from: base - 1,
@@ -1078,6 +1091,99 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				aggregationAttempts: 1,
 				aggregationError: "",
 			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	test("event property breakdown groups custom track events by requested property", async () => {
+		vi.useFakeTimers();
+		try {
+			const { t, siteId, writeKeyHash } = await createSite();
+			const base = Date.UTC(2026, 0, 13, 9, 0, 0);
+
+			await t.mutation(api.ingest.ingestBatch, {
+				writeKeyHash,
+				visitorId: "visitor-1",
+				sessionId: "session-1",
+				context: {
+					source: "web",
+				},
+				events: [
+					{
+						type: "track",
+						name: "plan_selected",
+						occurredAt: base,
+						eventId: "plan-1",
+						properties: { plan: "pro", billingCycle: "monthly" },
+					},
+					{
+						type: "track",
+						name: "plan_selected",
+						occurredAt: base + 1_000,
+						eventId: "plan-2",
+						properties: { plan: "starter", billingCycle: "monthly" },
+					},
+					{
+						type: "track",
+						name: "plan_selected",
+						occurredAt: base + 2_000,
+						eventId: "plan-3",
+						properties: { plan: "pro", billingCycle: "yearly" },
+					},
+					{
+						type: "track",
+						name: "checkout_started",
+						occurredAt: base + 3_000,
+						eventId: "checkout-1",
+						properties: { plan: "enterprise" },
+					},
+				],
+			});
+
+			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+
+			const byPlan = await t.query(api.analytics.getEventPropertyBreakdown, {
+				siteId,
+				eventName: "plan_selected",
+				propertyKey: "plan",
+				from: base - 1,
+				to: base + hourMs,
+				limit: 10,
+			});
+			expect(byPlan).toEqual([
+				{ value: "pro", count: 2 },
+				{ value: "starter", count: 1 },
+			]);
+
+			const byBillingCycle = await t.query(
+				api.analytics.getEventPropertyBreakdown,
+				{
+					siteId,
+					eventName: "plan_selected",
+					propertyKey: "billingCycle",
+					from: base - 1,
+					to: base + hourMs,
+					limit: 10,
+				},
+			);
+			expect(byBillingCycle).toEqual([
+				{ value: "monthly", count: 2 },
+				{ value: "yearly", count: 1 },
+			]);
+
+			const missingProperty = await t.query(
+				api.analytics.getEventPropertyBreakdown,
+				{
+					siteId,
+					eventName: "plan_selected",
+					propertyKey: "variant",
+					from: base - 1,
+					to: base + hourMs,
+					limit: 10,
+				},
+			);
+			expect(missingProperty).toEqual([]);
 		} finally {
 			vi.useRealTimers();
 		}
