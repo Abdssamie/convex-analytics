@@ -9,8 +9,10 @@ import {
 	paginatedSessionsValidator,
 } from "./types.js";
 import type { IdOfSite } from "./types.js";
-import { hourMs, dayMs, rollupShardCount } from "./constants.js";
+import { hourMs, dayMs } from "./constants.js";
 import { floorToBucket, sumRollups } from "./helpers.js";
+
+const scanPageSize = 256;
 
 export const getOverview = query({
 	args: {
@@ -209,18 +211,19 @@ export async function queryHourlyRollups(
 	if (args.from >= args.to) {
 		return [];
 	}
-	return await ctx.db
-		.query("rollupShards")
-		.withIndex("by_site_interval_dimension_key_bucket", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.eq("interval", "hour")
-				.eq("dimension", dimension)
-				.eq("key", key)
-				.gte("bucketStart", floorToBucket(args.from, hourMs))
-				.lt("bucketStart", args.to),
-		)
-		.take(2000 * rollupShardCount);
+	return await readAll(() =>
+		ctx.db
+			.query("rollupShards")
+			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("interval", "hour")
+					.eq("dimension", dimension)
+					.eq("key", key)
+					.gte("bucketStart", floorToBucket(args.from, hourMs))
+					.lt("bucketStart", args.to),
+			),
+	);
 }
 
 export async function queryDailyRollups(
@@ -232,18 +235,19 @@ export async function queryDailyRollups(
 	if (args.from >= args.to) {
 		return [];
 	}
-	return await ctx.db
-		.query("rollupShards")
-		.withIndex("by_site_interval_dimension_key_bucket", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.eq("interval", "day")
-				.eq("dimension", dimension)
-				.eq("key", key)
-				.gte("bucketStart", floorToBucket(args.from, dayMs))
-				.lt("bucketStart", args.to),
-		)
-		.take(1000 * rollupShardCount);
+	return await readAll(() =>
+		ctx.db
+			.query("rollupShards")
+			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("interval", "day")
+					.eq("dimension", dimension)
+					.eq("key", key)
+					.gte("bucketStart", floorToBucket(args.from, dayMs))
+					.lt("bucketStart", args.to),
+			),
+	);
 }
 
 export async function topDimension(
@@ -478,15 +482,14 @@ async function querySessionStats(
 	if (args.from >= args.to) {
 		return { sessionCount: 0, bounceCount: 0, durationMs: 0 };
 	}
-	const rows = await ctx.db
-		.query("sessions")
-		.withIndex("by_siteId_and_startedAt", (q) =>
+	const rows = await readAll(() =>
+		ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
 			q
 				.eq("siteId", args.siteId)
 				.gte("startedAt", args.from)
 				.lt("startedAt", args.to),
-		)
-		.take(10_000);
+		),
+	);
 	return rows.reduce(
 		(sum, row) => ({
 			sessionCount: sum.sessionCount + 1,
@@ -504,15 +507,14 @@ async function queryRawEvents(
 	if (args.from >= args.to) {
 		return [];
 	}
-	return await ctx.db
-		.query("events")
-		.withIndex("by_siteId_and_occurredAt", (q) =>
+	return await readAll(() =>
+		ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
 			q
 				.eq("siteId", args.siteId)
 				.gte("occurredAt", args.from)
 				.lt("occurredAt", args.to),
-		)
-		.take(10_000);
+		),
+	);
 }
 
 async function queryDimensionRollups(
@@ -528,17 +530,42 @@ async function queryDimensionRollups(
 	if (args.from >= args.to) {
 		return [];
 	}
-	return await ctx.db
-		.query("rollupShards")
-		.withIndex("by_site_interval_dimension_bucket", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.eq("interval", args.interval)
-				.eq("dimension", args.dimension)
-				.gte("bucketStart", args.from)
-				.lt("bucketStart", args.to),
-		)
-		.take(5000 * rollupShardCount);
+	return await readAll(() =>
+		ctx.db
+			.query("rollupShards")
+			.withIndex("by_site_interval_dimension_bucket", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("interval", args.interval)
+					.eq("dimension", args.dimension)
+					.gte("bucketStart", args.from)
+					.lt("bucketStart", args.to),
+			),
+	);
+}
+
+type PagedQuery<T> = {
+	paginate(args: { numItems: number; cursor: string | null }): Promise<{
+		page: T[];
+		isDone: boolean;
+		continueCursor: string;
+	}>;
+};
+
+async function readAll<T>(createQuery: () => PagedQuery<T>) {
+	const rows: T[] = [];
+	let cursor: string | null = null;
+	while (true) {
+		const page = await createQuery().paginate({
+			numItems: scanPageSize,
+			cursor,
+		});
+		rows.push(...(page.page as T[]));
+		if (page.isDone) {
+			return rows;
+		}
+		cursor = page.continueCursor;
+	}
 }
 
 function buildExactRangePlan(from: number, to: number) {

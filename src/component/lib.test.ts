@@ -603,12 +603,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			limit: 10,
 		});
 
-		await t.mutation(internal.compaction.compactShards, {
+		await t.action(internal.compaction.compactShards, {
 			siteId,
 			interval: "hour",
 			now,
 		});
-		await t.mutation(internal.compaction.compactShards, {
+		await t.action(internal.compaction.compactShards, {
 			siteId,
 			interval: "day",
 			now,
@@ -721,7 +721,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(oldRowsBefore.length).toBeGreaterThan(1);
 		expect(recentRowsBefore.length).toBeGreaterThan(1);
 
-		await t.mutation(internal.compaction.compactShards, {
+		await t.action(internal.compaction.compactShards, {
 			siteId,
 			interval: "hour",
 			now,
@@ -1004,6 +1004,114 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		});
 		expect(hourlyOverview!.updatedAt).toBeGreaterThan(now - 1_000);
 		expect(dailyOverview!.updatedAt).toBeGreaterThan(now - 1_000);
+	});
+
+	test("compaction page mutation only folds one bucket dimension at a time", async () => {
+		const { t, siteId } = await createSite();
+		const now = Date.UTC(2026, 0, 14, 12, 0, 0);
+		const bucketStart = floorToBucket(now - 4 * hourMs, hourMs);
+
+		await t.run(async (ctx) => {
+			for (let shard = 1; shard <= 3; shard += 1) {
+				await ctx.db.insert("rollupShards", {
+					siteId,
+					interval: "hour",
+					bucketStart,
+					dimension: "overview",
+					key: "all",
+					shard,
+					count: 2,
+					uniqueVisitorCount: 2,
+					sessionCount: 2,
+					pageviewCount: 2,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: now,
+				});
+				await ctx.db.insert("rollupShards", {
+					siteId,
+					interval: "hour",
+					bucketStart,
+					dimension: "event",
+					key: "pageview",
+					shard,
+					count: 1,
+					uniqueVisitorCount: 0,
+					sessionCount: 0,
+					pageviewCount: 1,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: now,
+				});
+			}
+		});
+
+		const firstPage = await t.mutation(internal.compaction.compactShardPairPage, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			now,
+			cursor: null,
+			limit: 2,
+		});
+		expect(firstPage.compactedRows).toBe(2);
+		expect(firstPage.isDone).toBe(false);
+
+		const overviewRowsMidway = await getRollupBucketRows(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			key: "all",
+		});
+		const eventRowsMidway = await getRollupBucketRows(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "event",
+			key: "pageview",
+		});
+		expect(overviewRowsMidway.some((row) => row.shard === 0)).toBe(true);
+		expect(eventRowsMidway.every((row) => row.shard !== 0)).toBe(true);
+
+		let cursor = firstPage.continueCursor;
+		while (cursor !== null) {
+			const nextPage = await t.mutation(internal.compaction.compactShardPairPage, {
+				siteId,
+				interval: "hour",
+				bucketStart,
+				dimension: "overview",
+				now,
+				cursor,
+				limit: 2,
+			});
+			cursor = nextPage.continueCursor;
+		}
+
+		const overviewRowsAfter = await getRollupBucketRows(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			key: "all",
+		});
+		const eventRowsAfter = await getRollupBucketRows(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "event",
+			key: "pageview",
+		});
+		expect(overviewRowsAfter).toHaveLength(1);
+		expect(overviewRowsAfter[0]).toMatchObject({
+			shard: 0,
+			count: 6,
+			uniqueVisitorCount: 6,
+			sessionCount: 6,
+			pageviewCount: 6,
+		});
+		expect(eventRowsAfter).toHaveLength(3);
 	});
 
 	test("failed aggregations retry with backoff, then stay failed until manual requeue", async () => {
