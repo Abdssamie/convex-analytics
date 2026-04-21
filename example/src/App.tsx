@@ -1,13 +1,29 @@
 import "./App.css";
 import { createAnalytics } from "@Abdssamie/convex-analytics";
-import { useMemo, useState } from "react";
+import { AnalyticsDashboard } from "@Abdssamie/convex-analytics/react";
+import { useQuery } from "convex/react";
+import { useMemo, useState, useEffect } from "react";
+import { api } from "../convex/_generated/api";
 
 const writeKey = import.meta.env.VITE_ANALYTICS_WRITE_KEY ?? "write_demo_local";
 
 function App() {
+  const [path, setPath] = useState(window.location.pathname);
   const [plan, setPlan] = useState<"starter" | "pro">("starter");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("No event sent yet.");
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => setPath(window.location.pathname);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  const navigate = (to: string) => {
+    window.history.pushState({}, "", to);
+    setPath(to);
+  };
 
   const analytics = useMemo(() => {
     const endpoint = import.meta.env.VITE_CONVEX_URL.replace(
@@ -21,6 +37,8 @@ function App() {
       autoPageviews: true,
     });
   }, []);
+
+  const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
 
   function selectPlan(nextPlan: "starter" | "pro") {
     setPlan(nextPlan);
@@ -42,8 +60,31 @@ function App() {
     setMessage(`Tracked identify for ${email.trim()}`);
   }
 
+  if (path === "/dashboard") {
+    return (
+      <main className="shell">
+        <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <button onClick={() => navigate("/")}>← Back to Demo</button>
+          <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>
+            Connected to site: <strong>{site?.slug ?? '...'}</strong>
+          </p>
+        </div>
+        {site ? (
+          <AnalyticsDashboard siteId={site._id} api={api.example} />
+        ) : (
+          <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+            Loading site configuration...
+          </div>
+        )}
+      </main>
+    );
+  }
+
   return (
     <main className="shell">
+      <nav style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <button onClick={() => navigate("/dashboard")}>View Analytics Dashboard →</button>
+      </nav>
       <section className="hero">
         <p className="eyebrow">Tracked Example App</p>
         <h1>Launch a tiny product workspace.</h1>

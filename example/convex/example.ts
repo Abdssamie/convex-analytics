@@ -1,6 +1,9 @@
 import { mutation } from "./_generated/server.js";
 import { components } from "./_generated/api.js";
-import { exposeApi } from "@Abdssamie/convex-analytics";
+import {
+  exposeAdminApi,
+  exposeAnalyticsApi,
+} from "@Abdssamie/convex-analytics";
 import { v } from "convex/values";
 
 async function hashWriteKey(writeKey: string) {
@@ -18,16 +21,26 @@ export const {
   updateSite,
   rotateWriteKey,
   aggregatePending,
+  retryFailedEvents,
   getSiteBySlug,
+  cleanupSite,
+  pruneExpired,
+} = exposeAdminApi(components.convexAnalytics, {
+  auth: async () => {},
+});
+
+export const {
   getOverview,
   getTimeseries,
   getTopPages,
   getTopReferrers,
+  getTopSources,
+  getTopMediums,
   getTopCampaigns,
   getTopEvents,
   listRawEvents,
   listSessions,
-} = exposeApi(components.convexAnalytics, {
+} = exposeAnalyticsApi(components.convexAnalytics, {
   auth: async () => {},
 });
 

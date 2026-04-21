@@ -9,8 +9,10 @@ import {
 	maxBatchSize,
 	defaultSettings,
 	aggregationBatchLimit,
+	aggregationRetryDelayMs,
 	hourMs,
 	dayMs,
+	maxAggregationAttempts,
 } from "./constants";
 import {
 	normalizeEventName,
@@ -124,23 +126,9 @@ export const ingestBatch = mutation({
 			});
 			insertedEventIds.push(eventDbId);
 
-			if (event.type === "pageview" && event.path) {
-				await ctx.db.insert("pageViews", {
-					siteId: site._id,
-					occurredAt,
-					visitorId: args.visitorId,
-					sessionId: args.sessionId,
-					path: event.path,
-					title: event.title,
-					referrer: event.referrer,
-					utmSource: args.context?.utmSource,
-					utmMedium: args.context?.utmMedium,
-					utmCampaign: args.context?.utmCampaign,
-				});
-			}
-
 			accepted += 1;
 		}
+
 
 		if (insertedEventIds.length > 0) {
 			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
@@ -158,9 +146,22 @@ export const aggregateEventBatch = internalMutation({
 	returns: v.object({
 		aggregated: v.number(),
 		skipped: v.number(),
+		failed: v.number(),
 	}),
 	handler: async (ctx, args) => {
-		return await aggregateEventsByIds(ctx, args.eventIds);
+		const result = await aggregateEventsByIds(ctx, args.eventIds);
+		if (result.retriableEventIds.length > 0) {
+			await ctx.scheduler.runAfter(
+				aggregationRetryDelayMs,
+				internal.ingest.aggregateEventBatch,
+				{ eventIds: result.retriableEventIds },
+			);
+		}
+		return {
+			aggregated: result.aggregated,
+			skipped: result.skipped,
+			failed: result.failed,
+		};
 	},
 });
 export const aggregatePending = mutation({
@@ -172,6 +173,7 @@ export const aggregatePending = mutation({
 	returns: v.object({
 		aggregated: v.number(),
 		skipped: v.number(),
+		failed: v.number(),
 		remaining: v.number(),
 	}),
 	handler: async (ctx, args) => {
@@ -189,8 +191,20 @@ export const aggregatePending = mutation({
 		const eventIds = rows.slice(0, limit).map((row) => row._id);
 		const result =
 			eventIds.length === 0
-				? { aggregated: 0, skipped: 0 }
+				? {
+						aggregated: 0,
+						skipped: 0,
+						failed: 0,
+						retriableEventIds: [],
+					}
 				: await aggregateEventsByIds(ctx, eventIds);
+		if (result.retriableEventIds.length > 0) {
+			await ctx.scheduler.runAfter(
+				aggregationRetryDelayMs,
+				internal.ingest.aggregateEventBatch,
+				{ eventIds: result.retriableEventIds },
+			);
+		}
 		if (rows.length > limit) {
 			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
 				siteId: args.siteId,
@@ -198,11 +212,11 @@ export const aggregatePending = mutation({
 				limit,
 			});
 		} else {
-			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
 				siteId: args.siteId,
 				interval: "hour",
 			});
-			await ctx.scheduler.runAfter(0, api.compaction.compactShards, {
+			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
 				siteId: args.siteId,
 				interval: "day",
 			});
@@ -210,7 +224,55 @@ export const aggregatePending = mutation({
 		return {
 			aggregated: result.aggregated,
 			skipped: result.skipped,
+			failed: result.failed,
 			remaining: Math.max(0, rows.length - limit),
+		};
+	},
+});
+
+export const retryFailedEvents = mutation({
+	args: {
+		siteId: v.id("sites"),
+		limit: v.optional(v.number()),
+		runUntilComplete: v.optional(v.boolean()),
+	},
+	returns: v.object({
+		requeued: v.number(),
+		hasMore: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
+		const rows = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+				q.eq("siteId", args.siteId).eq("aggregationStatus", "failed"),
+			)
+			.take(limit + 1);
+		const toRequeue = rows.slice(0, limit);
+		for (const row of toRequeue) {
+			await ctx.db.patch(row._id, {
+				aggregationStatus: "pending",
+				aggregationError: "",
+				aggregationAttempts: 0,
+			});
+		}
+		const hasMore = rows.length > limit;
+		if (hasMore && args.runUntilComplete) {
+			await ctx.scheduler.runAfter(0, api.ingest.retryFailedEvents, {
+				siteId: args.siteId,
+				limit,
+				runUntilComplete: true,
+			});
+		}
+		if (toRequeue.length > 0) {
+			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
+				siteId: args.siteId,
+				limit,
+			});
+		}
+		return {
+			requeued: toRequeue.length,
+			hasMore,
 		};
 	},
 });
@@ -221,7 +283,10 @@ export async function aggregateEventsByIds(
 ) {
 	let aggregated = 0;
 	let skipped = 0;
+	let failed = 0;
 	const now = Date.now();
+	const retriableEventIds: Array<Id<"events">> = [];
+	const rollupDeltas = new Map<string, RollupShardDelta>();
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregationStatus === "done") {
@@ -255,7 +320,7 @@ export async function aggregateEventsByIds(
 				eventType: event.eventType,
 				sessionTimeoutMs: site.settings.sessionTimeoutMs,
 			});
-			await updateRollupShards(ctx, {
+			accumulateRollupShards(rollupDeltas, {
 				siteId: event.siteId,
 				occurredAt: event.occurredAt,
 				eventName: event.eventName,
@@ -268,7 +333,10 @@ export async function aggregateEventsByIds(
 				receivedAt: now,
 				newSession: session.created,
 				newVisitor: visitor.created,
-				shard: shardForEvent(event._id),
+				shard: shardForEvent(
+					event._id,
+					site.settings.rollupShardCount ?? defaultSettings.rollupShardCount,
+				),
 			});
 			await ctx.db.patch(event._id, {
 				contributesSession: session.created,
@@ -280,17 +348,22 @@ export async function aggregateEventsByIds(
 			});
 			aggregated += 1;
 		} catch (error) {
+			const nextAttempts = (event.aggregationAttempts ?? 0) + 1;
 			await ctx.db.patch(event._id, {
 				aggregationStatus: "failed",
-				aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
+				aggregationAttempts: nextAttempts,
 				aggregationError:
 					error instanceof Error ? error.message : "Aggregation failed",
 			});
-			throw error;
+			if (nextAttempts < maxAggregationAttempts) {
+				retriableEventIds.push(event._id);
+			}
+			failed += 1;
 		}
 	}
+	await flushRollupShards(ctx, rollupDeltas);
 
-	return { aggregated, skipped };
+	return { aggregated, skipped, failed, retriableEventIds };
 }
 
 export async function upsertVisitor(
@@ -355,10 +428,11 @@ export async function upsertSession(
 ) {
 	const existing = await ctx.db
 		.query("sessions")
-		.withIndex("by_siteId_and_sessionId", (q) =>
+		.withIndex("by_siteId_and_sessionId_and_startedAt", (q) =>
 			q.eq("siteId", args.siteId).eq("sessionId", args.sessionId),
 		)
-		.unique();
+		.order("desc")
+		.first();
 	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	const isNewSession =
 		!existing ||
@@ -419,23 +493,39 @@ export async function upsertSession(
 	};
 }
 
-export async function updateRollupShards(
-	ctx: MutationCtx,
-	args: {
-		siteId: IdOfSite;
-		occurredAt: number;
-		eventName: string;
-		eventType: "pageview" | "track" | "identify";
-		path?: string;
-		referrer?: string;
-		utmSource?: string;
-		utmMedium?: string;
-		utmCampaign?: string;
-		receivedAt: number;
-		newVisitor: boolean;
-		newSession: boolean;
-		shard: number;
-	},
+type RollupShardInput = {
+	siteId: IdOfSite;
+	occurredAt: number;
+	eventName: string;
+	eventType: "pageview" | "track" | "identify";
+	path?: string;
+	referrer?: string;
+	utmSource?: string;
+	utmMedium?: string;
+	utmCampaign?: string;
+	receivedAt: number;
+	newVisitor: boolean;
+	newSession: boolean;
+	shard: number;
+};
+
+type RollupShardDelta = {
+	siteId: IdOfSite;
+	interval: "hour" | "day";
+	bucketStart: number;
+	dimension: string;
+	key: string;
+	shard: number;
+	count: number;
+	uniqueVisitorCount: number;
+	sessionCount: number;
+	pageviewCount: number;
+	updatedAt: number;
+};
+
+export function accumulateRollupShards(
+	deltas: Map<string, RollupShardDelta>,
+	args: RollupShardInput,
 ) {
 	const dimensions = [
 		{ dimension: "overview", key: "all" },
@@ -450,39 +540,66 @@ export async function updateRollupShards(
 			? { dimension: "utmCampaign", key: args.utmCampaign }
 			: null,
 	].filter((item): item is { dimension: string; key: string } => item !== null);
+	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	for (const item of dimensions) {
-		await incrementRollupShard(ctx, {
-			...args,
+		mergeRollupShardDelta(deltas, {
+			siteId: args.siteId,
 			interval: "hour",
 			bucketStart: floorToBucket(args.occurredAt, hourMs),
 			dimension: item.dimension,
 			key: item.key,
+			shard: args.shard,
+			count: 1,
+			uniqueVisitorCount: args.newVisitor ? 1 : 0,
+			sessionCount: args.newSession ? 1 : 0,
+			pageviewCount: pageviewIncrement,
+			updatedAt: args.receivedAt,
 		});
-		await incrementRollupShard(ctx, {
-			...args,
+		mergeRollupShardDelta(deltas, {
+			siteId: args.siteId,
 			interval: "day",
 			bucketStart: floorToBucket(args.occurredAt, dayMs),
 			dimension: item.dimension,
 			key: item.key,
+			shard: args.shard,
+			count: 1,
+			uniqueVisitorCount: args.newVisitor ? 1 : 0,
+			sessionCount: args.newSession ? 1 : 0,
+			pageviewCount: pageviewIncrement,
+			updatedAt: args.receivedAt,
 		});
 	}
 }
 
-export async function incrementRollupShard(
-	ctx: MutationCtx,
-	args: {
-		siteId: IdOfSite;
-		interval: "hour" | "day";
-		bucketStart: number;
-		dimension: string;
-		key: string;
-		shard: number;
-		eventType: "pageview" | "track" | "identify";
-		receivedAt: number;
-		newVisitor: boolean;
-		newSession: boolean;
-	},
+export function mergeRollupShardDelta(
+	deltas: Map<string, RollupShardDelta>,
+	args: RollupShardDelta,
 ) {
+	const mapKey = [
+		args.siteId,
+		args.interval,
+		args.bucketStart,
+		args.dimension,
+		args.key,
+		args.shard,
+	].join("|");
+	const existing = deltas.get(mapKey);
+	if (!existing) {
+		deltas.set(mapKey, args);
+		return;
+	}
+	existing.count += args.count;
+	existing.uniqueVisitorCount += args.uniqueVisitorCount;
+	existing.sessionCount += args.sessionCount;
+	existing.pageviewCount += args.pageviewCount;
+	existing.updatedAt = Math.max(existing.updatedAt, args.updatedAt);
+}
+
+export async function flushRollupShards(
+	ctx: MutationCtx,
+	deltas: Map<string, RollupShardDelta>,
+) {
+	for (const args of deltas.values()) {
 	const existing = await ctx.db
 		.query("rollupShards")
 		.withIndex("by_site_interval_dimension_key_bucket_shard", (q) =>
@@ -495,31 +612,32 @@ export async function incrementRollupShard(
 				.eq("shard", args.shard),
 		)
 		.unique();
-	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
-	if (!existing) {
-		await ctx.db.insert("rollupShards", {
-			siteId: args.siteId,
-			interval: args.interval,
-			bucketStart: args.bucketStart,
-			dimension: args.dimension,
-			key: args.key,
-			shard: args.shard,
-			count: 1,
-			uniqueVisitorCount: args.newVisitor ? 1 : 0,
-			sessionCount: args.newSession ? 1 : 0,
-			pageviewCount: pageviewIncrement,
-			bounceCount: 0,
-			durationMs: 0,
-			updatedAt: args.receivedAt,
-		});
-		return;
-	}
+		if (!existing) {
+			await ctx.db.insert("rollupShards", {
+				siteId: args.siteId,
+				interval: args.interval,
+				bucketStart: args.bucketStart,
+				dimension: args.dimension,
+				key: args.key,
+				shard: args.shard,
+				count: args.count,
+				uniqueVisitorCount: args.uniqueVisitorCount,
+				sessionCount: args.sessionCount,
+				pageviewCount: args.pageviewCount,
+				bounceCount: 0,
+				durationMs: 0,
+				updatedAt: args.updatedAt,
+			});
+			continue;
+		}
 
-	await ctx.db.patch(existing._id, {
-		count: existing.count + 1,
-		uniqueVisitorCount: existing.uniqueVisitorCount + (args.newVisitor ? 1 : 0),
-		sessionCount: existing.sessionCount + (args.newSession ? 1 : 0),
-		pageviewCount: existing.pageviewCount + pageviewIncrement,
-		updatedAt: args.receivedAt,
-	});
+		await ctx.db.patch(existing._id, {
+			count: existing.count + args.count,
+			uniqueVisitorCount:
+				existing.uniqueVisitorCount + args.uniqueVisitorCount,
+			sessionCount: existing.sessionCount + args.sessionCount,
+			pageviewCount: existing.pageviewCount + args.pageviewCount,
+			updatedAt: Math.max(existing.updatedAt, args.updatedAt),
+		});
+	}
 }

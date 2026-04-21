@@ -26,9 +26,25 @@ The component owns its own Convex tables:
 - `visitors`: durable anonymous visitor records
 - `sessions`: session windows and coarse device/source summary
 - `events`: append-only raw events with pending/done aggregation state
-- `pageViews`: denormalized pageview rows
 - `rollupShards`: sharded hourly/daily report counters
 - `ingestDedupes`: short-lived retry/idempotency cache
+
+```mermaid
+flowchart LR
+    Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
+    Http --> Ingest["ingestBatch\nappend-only raw event insert"]
+    Ingest --> Events[("events")]
+    Ingest --> Dedupe[("ingestDedupes")]
+    Ingest --> Worker["aggregateEventBatch / aggregatePending"]
+    Worker --> Visitors[("visitors")]
+    Worker --> Sessions[("sessions")]
+    Worker --> Rollups[("rollupShards\nhourly + daily shards")]
+    Worker --> Compaction["compactShards\nbackground shard collapse"]
+    Compaction --> Rollups
+    Rollups --> Dashboard["Dashboard queries\ngetOverview/getTimeseries/top lists"]
+    Events --> Dashboard
+    Sessions --> Dashboard
+```
 
 Why `sites` exists: one Convex deployment can track multiple sites or apps.
 For the common one-site case, create one site named `default` and ignore the
@@ -38,11 +54,17 @@ Browser traffic should use the HTTP ingest route. Do not send every browser
 event through public Convex mutations. The SDK batches events and the HTTP route
 hashes the write key before calling the component.
 
-Ingest and reporting are split on purpose. The ingest mutation writes raw events
-quickly, marks them `pending`, and schedules background aggregation. The
-aggregator updates sharded rollup counters and marks each event `done` in the
-same transaction, so retries do not double-count. Reports read `rollupShards`,
-so they can lag raw events by a few seconds.
+Ingest and reporting are split on purpose. `ingestBatch` writes raw events
+quickly, marks them `pending`, and schedules background aggregation. The worker
+materializes visitors, sessions, and rollup shards, then marks each event
+`done`. Compaction later collapses old shard fanout back to shard `0` so
+dashboard queries stay cheap.
+
+Dashboard queries are range-aware:
+
+- overview and top-dimension queries use exact edge handling
+- first/last timeseries bucket is clipped to requested range
+- raw events can lag by worker time, usually a few seconds
 
 ## Installation
 
@@ -78,7 +100,6 @@ registerRoutes(http, components.convexAnalytics, {
       allowedOrigins: ["https://example.com"],
       retentionDays: 90,
       rawEventRetentionDays: 90,
-      pageViewRetentionDays: 90,
       hourlyRollupRetentionDays: 90,
       // Omit dailyRollupRetentionDays to keep daily rollups indefinitely.
       dedupeRetentionMs: 24 * 60 * 60 * 1000,
@@ -88,6 +109,68 @@ registerRoutes(http, components.convexAnalytics, {
 
 export default http;
 ```
+
+Add default maintenance wrappers once:
+
+```ts
+// convex/cleanup.ts
+import { components } from "./_generated/api";
+import { internalMutation } from "./_generated/server";
+import { v } from "convex/values";
+import {
+  runCleanupSite,
+  runPruneExpired,
+} from "@Abdssamie/convex-analytics";
+
+export const site = internalMutation({
+  args: {
+    siteId: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+    runUntilComplete: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    return await runCleanupSite(ctx, components.convexAnalytics, args);
+  },
+});
+
+export const dedupes = internalMutation({
+  args: {
+    now: v.optional(v.number()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    return await runPruneExpired(ctx, components.convexAnalytics, args);
+  },
+});
+```
+
+Then register default crons:
+
+```ts
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal } from "./_generated/api";
+import { registerDefaultAnalyticsCrons } from "@Abdssamie/convex-analytics";
+
+const crons = cronJobs();
+
+registerDefaultAnalyticsCrons(
+  crons,
+  {
+    cleanupSite: internal.cleanup.site,
+    pruneExpired: internal.cleanup.dedupes,
+  },
+  {
+    slug: "default",
+  },
+);
+
+export default crons;
+```
+
+That is enough for normal installs.
 
 For multiple sites on the same Convex deployment, add more site configs with
 separate write keys and origins:
@@ -123,16 +206,20 @@ Expose report/admin wrappers only if your app needs them:
 
 ```ts
 import { components } from "./_generated/api";
-import { exposeApi } from "@Abdssamie/convex-analytics";
+import { exposeAnalyticsApi } from "@Abdssamie/convex-analytics";
 
 export const {
   getOverview,
   getTimeseries,
   getTopPages,
-  aggregatePending,
+  getTopReferrers,
+  getTopSources,
+  getTopMediums,
+  getTopCampaigns,
+  getTopEvents,
   listRawEvents,
   listSessions,
-} = exposeApi(components.convexAnalytics, {
+} = exposeAnalyticsApi(components.convexAnalytics, {
   auth: async (ctx, operation) => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
@@ -143,18 +230,81 @@ export const {
 });
 ```
 
+## Dashboard API
+
+`exposeApi(...)` gives installers ergonomic app-facing wrappers around component
+functions. For dashboard/read-only app surface, use `exposeAnalyticsApi(...)`.
+
+Dashboard surface:
+
+- `getOverview(siteId, from, to)`
+- `getTimeseries(siteId, from, to, interval)`
+- `getTopPages(siteId, from, to, limit?)`
+- `getTopReferrers(siteId, from, to, limit?)`
+- `getTopSources(siteId, from, to, limit?)`
+- `getTopMediums(siteId, from, to, limit?)`
+- `getTopCampaigns(siteId, from, to, limit?)`
+- `getTopEvents(siteId, from, to, limit?)`
+- `listRawEvents(siteId, from?, to?, paginationOpts)`
+- `listSessions(siteId, from?, to?, paginationOpts)`
+
+Admin/repair functions exist too, but they are separate from dashboard reads.
+Use `exposeAdminApi(...)` only in backend/admin modules:
+
+```ts
+import { components } from "./_generated/api";
+import { exposeAdminApi } from "@Abdssamie/convex-analytics";
+
+export const {
+  createSite,
+  ensureSite,
+  updateSite,
+  rotateWriteKey,
+  aggregatePending,
+  retryFailedEvents,
+  cleanupSite,
+  pruneExpired,
+} = exposeAdminApi(components.convexAnalytics, {
+  auth: async (ctx, operation) => {
+    // admin auth / site ownership check here
+  },
+});
+```
+
+Admin surface:
+
+- `createSite`, `ensureSite`, `updateSite`, `rotateWriteKey`
+- `aggregatePending(siteId, now?, limit?)`
+- `retryFailedEvents(siteId, limit?, runUntilComplete?)`
+- `cleanupSite(siteId? | slug?, now?, limit?, runUntilComplete?)`
+- `pruneExpired(now?, limit?)`
+
+Recommended dashboard shape:
+
+1. `getOverview` for KPI cards
+2. `getTimeseries` for chart
+3. top-dimension queries for tables
+4. `listRawEvents` and `listSessions` for drill-down/debug
+
+Both drill-down queries return Convex pagination objects:
+
+- `page`
+- `isDone`
+- `continueCursor`
+
+Raw events are append-only source of truth. Rollups are serving layer.
+
 ## Retention
 
 Retention is configured per site. Defaults are cost-conscious:
 
 - raw `events`: 90 days
-- `pageViews`: 90 days
 - hourly `rollupShards`: 90 days
 - daily `rollupShards`: kept indefinitely
 - `ingestDedupes`: 24 hours from insertion
 
-`retentionDays` is the shared default for raw events, pageviews, and hourly
-rollups. Override the specific fields when needed:
+`retentionDays` is shared default for raw events and hourly rollups. Override
+specific fields when needed:
 
 ```ts
 registerRoutes(http, components.convexAnalytics, {
@@ -165,7 +315,6 @@ registerRoutes(http, components.convexAnalytics, {
       name: "Default site",
       writeKey: process.env.ANALYTICS_WRITE_KEY!,
       rawEventRetentionDays: 30,
-      pageViewRetentionDays: 30,
       hourlyRollupRetentionDays: 14,
       dailyRollupRetentionDays: 730,
       dedupeRetentionMs: 6 * 60 * 60 * 1000,
@@ -174,8 +323,10 @@ registerRoutes(http, components.convexAnalytics, {
 });
 ```
 
-Cleanup is explicit so you control request volume and billing. A small scheduled
-cron is enough for most apps. Keep cleanup functions internal:
+Cleanup is explicit so you control request volume and billing. For most apps,
+use the default helper above and stop thinking about it.
+
+If you want custom schedules, this is the manual shape:
 
 ```ts
 // convex/cleanup.ts
@@ -189,7 +340,7 @@ export const site = internalMutation({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(components.convexAnalytics.lib.cleanupSite, {
+    return await ctx.runMutation(components.convexAnalytics.maintenance.cleanupSite, {
       slug: args.slug,
       limit: args.limit,
     });
@@ -200,7 +351,7 @@ export const dedupes = internalMutation({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     return await ctx.runMutation(
-      components.convexAnalytics.lib.pruneExpired,
+      components.convexAnalytics.maintenance.pruneExpired,
       args,
     );
   },
@@ -233,8 +384,7 @@ crons.interval(
 export default crons;
 ```
 
-The cron functions should be internal app mutations. Do not expose cleanup to
-browser clients.
+These are admin functions. Do not call them from browser clients.
 
 Use `runUntilComplete: true` only for one-off backfills or after downtime. For
 normal production cron, keep it unset and let each run delete a bounded batch.
@@ -277,7 +427,9 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Retry dedupe prevents duplicate event inserts.
 - Ingest does not patch report counters inline.
 - Reports use sharded hourly/daily rollups for common analytics queries.
+- Old rollup shard fanout is compacted in background.
 - `aggregatePending` can repair missed pending events after deploys or failures.
+- `retryFailedEvents` can replay bounded failed batches after fixing root cause.
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.

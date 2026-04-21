@@ -20,10 +20,10 @@ export type SiteConfig = {
 	sessionTimeoutMs?: number;
 	retentionDays?: number;
 	rawEventRetentionDays?: number;
-	pageViewRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
 	dedupeRetentionMs?: number;
+	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
 };

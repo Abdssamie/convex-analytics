@@ -1,8 +1,8 @@
 import { components } from "./_generated/api.js";
-import { internalMutation } from "./_generated/server.js";
+import { internalAction, internalMutation } from "./_generated/server.js";
 import { v } from "convex/values";
 
-export const site = internalMutation({
+export const site = internalAction({
   args: {
     siteId: v.optional(v.string()),
     slug: v.optional(v.string()),
@@ -11,7 +11,7 @@ export const site = internalMutation({
     runUntilComplete: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(
+    return await ctx.runAction(
       components.convexAnalytics.maintenance.cleanupSite,
       args,
     );

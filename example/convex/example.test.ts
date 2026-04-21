@@ -1,9 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { initConvexTest } from "./setup.test";
 import { api } from "./_generated/api";
 
 describe("example", () => {
   test("creates a site and ingests events through app wrappers", async () => {
+    vi.useFakeTimers();
+    try {
     const t = initConvexTest();
     const siteId = await t.mutation(api.example.createSite, {
       slug: "default",
@@ -23,10 +25,7 @@ describe("example", () => {
       ],
     });
     expect(result.accepted).toBe(1);
-    await t.mutation(api.example.aggregatePending, {
-      siteId,
-      now: now + 1000,
-    });
+    await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
     const overview = await t.query(api.example.getOverview, {
       siteId,
@@ -34,5 +33,8 @@ describe("example", () => {
       to: now + 24 * 60 * 60 * 1000,
     });
     expect(overview.pageviews).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

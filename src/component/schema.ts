@@ -14,10 +14,10 @@ export default defineSchema({
 			sessionTimeoutMs: v.number(),
 			retentionDays: v.number(),
 			rawEventRetentionDays: v.optional(v.number()),
-			pageViewRetentionDays: v.optional(v.number()),
 			hourlyRollupRetentionDays: v.optional(v.number()),
 			dailyRollupRetentionDays: v.optional(v.number()),
 			dedupeRetentionMs: v.optional(v.number()),
+			rollupShardCount: v.optional(v.number()),
 			allowedPropertyKeys: v.optional(v.array(v.string())),
 			deniedPropertyKeys: v.optional(v.array(v.string())),
 		}),
@@ -61,6 +61,11 @@ export default defineSchema({
 		bounce: v.boolean(),
 	})
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
+		.index("by_siteId_and_sessionId_and_startedAt", [
+			"siteId",
+			"sessionId",
+			"startedAt",
+		])
 		.index("by_siteId_and_startedAt", ["siteId", "startedAt"])
 		.index("by_siteId_and_visitorId_and_startedAt", [
 			"siteId",
@@ -109,25 +114,6 @@ export default defineSchema({
 		.index("by_siteId_and_aggregationStatus_and_occurredAt", [
 			"siteId",
 			"aggregationStatus",
-			"occurredAt",
-		]),
-
-	pageViews: defineTable({
-		siteId: v.id("sites"),
-		occurredAt: v.number(),
-		visitorId: v.string(),
-		sessionId: v.string(),
-		path: v.string(),
-		title: v.optional(v.string()),
-		referrer: v.optional(v.string()),
-		utmSource: v.optional(v.string()),
-		utmMedium: v.optional(v.string()),
-		utmCampaign: v.optional(v.string()),
-	})
-		.index("by_siteId_and_occurredAt", ["siteId", "occurredAt"])
-		.index("by_siteId_and_path_and_occurredAt", [
-			"siteId",
-			"path",
 			"occurredAt",
 		]),
 
