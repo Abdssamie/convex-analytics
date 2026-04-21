@@ -3,7 +3,7 @@ import { api, internal } from "./_generated/api.js";
 import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
 import { dayMs, hourMs } from "./constants.js";
-import { floorToBucket } from "./helpers.js";
+import { floorToBucket, shardForEvent } from "./helpers.js";
 
 async function createSite(overrides?: {
 	slug?: string;
@@ -101,6 +101,33 @@ async function getRollupBucketRows(
 	});
 }
 
+async function getRollupShardRow(
+	t: ReturnType<typeof initConvexTest>,
+	args: {
+		siteId: Id<"sites">;
+		interval: "hour" | "day";
+		bucketStart: number;
+		dimension: string;
+		key: string;
+		shard: number;
+	},
+) {
+	return await t.run(async (ctx) => {
+		return await ctx.db
+			.query("rollupShards")
+			.withIndex("by_site_interval_dimension_key_bucket_shard", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("interval", args.interval)
+					.eq("dimension", args.dimension)
+					.eq("key", args.key)
+					.eq("bucketStart", args.bucketStart)
+					.eq("shard", args.shard),
+			)
+			.unique();
+	});
+}
+
 async function insertPendingPageviewEvents(
 	t: ReturnType<typeof initConvexTest>,
 	args: {
@@ -135,6 +162,77 @@ async function insertPendingPageviewEvents(
 		}
 		return eventIds;
 	});
+}
+
+async function insertPendingPageviewEvent(
+	t: ReturnType<typeof initConvexTest>,
+	args: {
+		siteId: Id<"sites">;
+		now: number;
+		occurredAt: number;
+		visitorId: string;
+		sessionId: string;
+		path?: string;
+		referrer?: string;
+		utmSource?: string;
+		utmCampaign?: string;
+	},
+) {
+	return await t.run(async (ctx) => {
+		return await ctx.db.insert("events", {
+			siteId: args.siteId,
+			receivedAt: args.now,
+			occurredAt: args.occurredAt,
+			visitorId: args.visitorId,
+			sessionId: args.sessionId,
+			eventType: "pageview",
+			eventName: "pageview",
+			path: args.path ?? "/",
+			title: "Page",
+			referrer: args.referrer,
+			source: "web",
+			utmSource: args.utmSource,
+			utmCampaign: args.utmCampaign,
+			aggregationStatus: "pending",
+			aggregationAttempts: 0,
+		});
+	});
+}
+
+async function insertCollidingPendingPageviewEvents(
+	t: ReturnType<typeof initConvexTest>,
+	args: {
+		siteId: Id<"sites">;
+		now: number;
+		occurredAt: number;
+		targetCount: number;
+	},
+) {
+	const byShard = new Map<number, Array<Id<"events">>>();
+	for (let index = 0; index < 64; index += 1) {
+		const eventId = await insertPendingPageviewEvent(t, {
+			siteId: args.siteId,
+			now: args.now,
+			occurredAt: args.occurredAt + index,
+			visitorId: `collision-visitor-${index}`,
+			sessionId: `collision-session-${index}`,
+			path: "/collision",
+			referrer: "https://google.com",
+			utmSource: "newsletter",
+			utmCampaign: "spring",
+		});
+		const shard = shardForEvent(eventId);
+		const shardIds = byShard.get(shard) ?? [];
+		shardIds.push(eventId);
+		byShard.set(shard, shardIds);
+		if (shardIds.length >= args.targetCount) {
+			return {
+				shard,
+				eventIds: shardIds.slice(0, args.targetCount),
+			};
+		}
+	}
+	throw new Error("Could not create colliding event ids");
 }
 
 describe("realistic ingestion, sharding, and compaction flows", () => {
@@ -732,6 +830,167 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			pageviewCount: 1,
 			eventCount: 1,
 		});
+	});
+
+	test("aggregateEventBatch merges same-shard rollup deltas within batch", async () => {
+		const { t, siteId } = await createSite();
+		const now = Date.UTC(2026, 0, 11, 12, 0, 0);
+		const bucketStart = floorToBucket(now, hourMs);
+		const { shard, eventIds } = await insertCollidingPendingPageviewEvents(t, {
+			siteId,
+			now,
+			occurredAt: bucketStart,
+			targetCount: 3,
+		});
+
+		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+
+		const hourlyOverview = await getRollupShardRow(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			key: "all",
+			shard,
+		});
+		const hourlyPage = await getRollupShardRow(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "page",
+			key: "/collision",
+			shard,
+		});
+		const hourlySource = await getRollupShardRow(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "utmSource",
+			key: "newsletter",
+			shard,
+		});
+		const dailyOverview = await getRollupShardRow(t, {
+			siteId,
+			interval: "day",
+			bucketStart: floorToBucket(bucketStart, dayMs),
+			dimension: "overview",
+			key: "all",
+			shard,
+		});
+
+		expect(hourlyOverview).toMatchObject({
+			count: 3,
+			uniqueVisitorCount: 3,
+			sessionCount: 3,
+			pageviewCount: 3,
+		});
+		expect(hourlyPage).toMatchObject({
+			count: 3,
+			uniqueVisitorCount: 3,
+			sessionCount: 3,
+			pageviewCount: 3,
+		});
+		expect(hourlySource).toMatchObject({
+			count: 3,
+			uniqueVisitorCount: 3,
+			sessionCount: 3,
+			pageviewCount: 3,
+		});
+		expect(dailyOverview).toMatchObject({
+			count: 3,
+			uniqueVisitorCount: 3,
+			sessionCount: 3,
+			pageviewCount: 3,
+		});
+
+		const hourlyOverviewRows = await getRollupBucketRows(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			key: "all",
+		});
+		expect(hourlyOverviewRows.filter((row) => row.shard === shard)).toHaveLength(1);
+	});
+
+	test("aggregateEventBatch patches existing rollup shard once with merged batch totals", async () => {
+		const { t, siteId } = await createSite();
+		const now = Date.UTC(2026, 0, 11, 14, 0, 0);
+		const bucketStart = floorToBucket(now, hourMs);
+		const { shard, eventIds } = await insertCollidingPendingPageviewEvents(t, {
+			siteId,
+			now,
+			occurredAt: bucketStart,
+			targetCount: 2,
+		});
+		const dayBucketStart = floorToBucket(bucketStart, dayMs);
+
+		await t.run(async (ctx) => {
+			await ctx.db.insert("rollupShards", {
+				siteId,
+				interval: "hour",
+				bucketStart,
+				dimension: "overview",
+				key: "all",
+				shard,
+				count: 7,
+				uniqueVisitorCount: 4,
+				sessionCount: 5,
+				pageviewCount: 6,
+				bounceCount: 0,
+				durationMs: 0,
+				updatedAt: now - 1_000,
+			});
+			await ctx.db.insert("rollupShards", {
+				siteId,
+				interval: "day",
+				bucketStart: dayBucketStart,
+				dimension: "overview",
+				key: "all",
+				shard,
+				count: 10,
+				uniqueVisitorCount: 6,
+				sessionCount: 7,
+				pageviewCount: 9,
+				bounceCount: 0,
+				durationMs: 0,
+				updatedAt: now - 1_000,
+			});
+		});
+
+		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+
+		const hourlyOverview = await getRollupShardRow(t, {
+			siteId,
+			interval: "hour",
+			bucketStart,
+			dimension: "overview",
+			key: "all",
+			shard,
+		});
+		const dailyOverview = await getRollupShardRow(t, {
+			siteId,
+			interval: "day",
+			bucketStart: dayBucketStart,
+			dimension: "overview",
+			key: "all",
+			shard,
+		});
+
+		expect(hourlyOverview).toMatchObject({
+			count: 9,
+			uniqueVisitorCount: 6,
+			sessionCount: 7,
+			pageviewCount: 8,
+		});
+		expect(dailyOverview).toMatchObject({
+			count: 12,
+			uniqueVisitorCount: 8,
+			sessionCount: 9,
+			pageviewCount: 11,
+		});
+		expect(hourlyOverview!.updatedAt).toBeGreaterThan(now - 1_000);
+		expect(dailyOverview!.updatedAt).toBeGreaterThan(now - 1_000);
 	});
 
 	test("failed aggregations retry with backoff, then stay failed until manual requeue", async () => {

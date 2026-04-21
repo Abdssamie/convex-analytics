@@ -285,6 +285,7 @@ export async function aggregateEventsByIds(
 	let failed = 0;
 	const now = Date.now();
 	const retriableEventIds: Array<Id<"events">> = [];
+	const rollupDeltas = new Map<string, RollupShardDelta>();
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregationStatus === "done") {
@@ -318,7 +319,7 @@ export async function aggregateEventsByIds(
 				eventType: event.eventType,
 				sessionTimeoutMs: site.settings.sessionTimeoutMs,
 			});
-			await updateRollupShards(ctx, {
+			accumulateRollupShards(rollupDeltas, {
 				siteId: event.siteId,
 				occurredAt: event.occurredAt,
 				eventName: event.eventName,
@@ -356,6 +357,7 @@ export async function aggregateEventsByIds(
 			failed += 1;
 		}
 	}
+	await flushRollupShards(ctx, rollupDeltas);
 
 	return { aggregated, skipped, failed, retriableEventIds };
 }
@@ -487,23 +489,39 @@ export async function upsertSession(
 	};
 }
 
-export async function updateRollupShards(
-	ctx: MutationCtx,
-	args: {
-		siteId: IdOfSite;
-		occurredAt: number;
-		eventName: string;
-		eventType: "pageview" | "track" | "identify";
-		path?: string;
-		referrer?: string;
-		utmSource?: string;
-		utmMedium?: string;
-		utmCampaign?: string;
-		receivedAt: number;
-		newVisitor: boolean;
-		newSession: boolean;
-		shard: number;
-	},
+type RollupShardInput = {
+	siteId: IdOfSite;
+	occurredAt: number;
+	eventName: string;
+	eventType: "pageview" | "track" | "identify";
+	path?: string;
+	referrer?: string;
+	utmSource?: string;
+	utmMedium?: string;
+	utmCampaign?: string;
+	receivedAt: number;
+	newVisitor: boolean;
+	newSession: boolean;
+	shard: number;
+};
+
+type RollupShardDelta = {
+	siteId: IdOfSite;
+	interval: "hour" | "day";
+	bucketStart: number;
+	dimension: string;
+	key: string;
+	shard: number;
+	count: number;
+	uniqueVisitorCount: number;
+	sessionCount: number;
+	pageviewCount: number;
+	updatedAt: number;
+};
+
+export function accumulateRollupShards(
+	deltas: Map<string, RollupShardDelta>,
+	args: RollupShardInput,
 ) {
 	const dimensions = [
 		{ dimension: "overview", key: "all" },
@@ -518,39 +536,66 @@ export async function updateRollupShards(
 			? { dimension: "utmCampaign", key: args.utmCampaign }
 			: null,
 	].filter((item): item is { dimension: string; key: string } => item !== null);
+	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	for (const item of dimensions) {
-		await incrementRollupShard(ctx, {
-			...args,
+		mergeRollupShardDelta(deltas, {
+			siteId: args.siteId,
 			interval: "hour",
 			bucketStart: floorToBucket(args.occurredAt, hourMs),
 			dimension: item.dimension,
 			key: item.key,
+			shard: args.shard,
+			count: 1,
+			uniqueVisitorCount: args.newVisitor ? 1 : 0,
+			sessionCount: args.newSession ? 1 : 0,
+			pageviewCount: pageviewIncrement,
+			updatedAt: args.receivedAt,
 		});
-		await incrementRollupShard(ctx, {
-			...args,
+		mergeRollupShardDelta(deltas, {
+			siteId: args.siteId,
 			interval: "day",
 			bucketStart: floorToBucket(args.occurredAt, dayMs),
 			dimension: item.dimension,
 			key: item.key,
+			shard: args.shard,
+			count: 1,
+			uniqueVisitorCount: args.newVisitor ? 1 : 0,
+			sessionCount: args.newSession ? 1 : 0,
+			pageviewCount: pageviewIncrement,
+			updatedAt: args.receivedAt,
 		});
 	}
 }
 
-export async function incrementRollupShard(
-	ctx: MutationCtx,
-	args: {
-		siteId: IdOfSite;
-		interval: "hour" | "day";
-		bucketStart: number;
-		dimension: string;
-		key: string;
-		shard: number;
-		eventType: "pageview" | "track" | "identify";
-		receivedAt: number;
-		newVisitor: boolean;
-		newSession: boolean;
-	},
+export function mergeRollupShardDelta(
+	deltas: Map<string, RollupShardDelta>,
+	args: RollupShardDelta,
 ) {
+	const mapKey = [
+		args.siteId,
+		args.interval,
+		args.bucketStart,
+		args.dimension,
+		args.key,
+		args.shard,
+	].join("|");
+	const existing = deltas.get(mapKey);
+	if (!existing) {
+		deltas.set(mapKey, args);
+		return;
+	}
+	existing.count += args.count;
+	existing.uniqueVisitorCount += args.uniqueVisitorCount;
+	existing.sessionCount += args.sessionCount;
+	existing.pageviewCount += args.pageviewCount;
+	existing.updatedAt = Math.max(existing.updatedAt, args.updatedAt);
+}
+
+export async function flushRollupShards(
+	ctx: MutationCtx,
+	deltas: Map<string, RollupShardDelta>,
+) {
+	for (const args of deltas.values()) {
 	const existing = await ctx.db
 		.query("rollupShards")
 		.withIndex("by_site_interval_dimension_key_bucket_shard", (q) =>
@@ -563,31 +608,32 @@ export async function incrementRollupShard(
 				.eq("shard", args.shard),
 		)
 		.unique();
-	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
-	if (!existing) {
-		await ctx.db.insert("rollupShards", {
-			siteId: args.siteId,
-			interval: args.interval,
-			bucketStart: args.bucketStart,
-			dimension: args.dimension,
-			key: args.key,
-			shard: args.shard,
-			count: 1,
-			uniqueVisitorCount: args.newVisitor ? 1 : 0,
-			sessionCount: args.newSession ? 1 : 0,
-			pageviewCount: pageviewIncrement,
-			bounceCount: 0,
-			durationMs: 0,
-			updatedAt: args.receivedAt,
-		});
-		return;
-	}
+		if (!existing) {
+			await ctx.db.insert("rollupShards", {
+				siteId: args.siteId,
+				interval: args.interval,
+				bucketStart: args.bucketStart,
+				dimension: args.dimension,
+				key: args.key,
+				shard: args.shard,
+				count: args.count,
+				uniqueVisitorCount: args.uniqueVisitorCount,
+				sessionCount: args.sessionCount,
+				pageviewCount: args.pageviewCount,
+				bounceCount: 0,
+				durationMs: 0,
+				updatedAt: args.updatedAt,
+			});
+			continue;
+		}
 
-	await ctx.db.patch(existing._id, {
-		count: existing.count + 1,
-		uniqueVisitorCount: existing.uniqueVisitorCount + (args.newVisitor ? 1 : 0),
-		sessionCount: existing.sessionCount + (args.newSession ? 1 : 0),
-		pageviewCount: existing.pageviewCount + pageviewIncrement,
-		updatedAt: args.receivedAt,
-	});
+		await ctx.db.patch(existing._id, {
+			count: existing.count + args.count,
+			uniqueVisitorCount:
+				existing.uniqueVisitorCount + args.uniqueVisitorCount,
+			sessionCount: existing.sessionCount + args.sessionCount,
+			pageviewCount: existing.pageviewCount + args.pageviewCount,
+			updatedAt: Math.max(existing.updatedAt, args.updatedAt),
+		});
+	}
 }
