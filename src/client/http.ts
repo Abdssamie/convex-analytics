@@ -84,6 +84,7 @@ export function registerRoutes(
 					dailyRollupRetentionDays:
 						configuredSite.dailyRollupRetentionDays,
 					dedupeRetentionMs: configuredSite.dedupeRetentionMs,
+					rollupShardCount: configuredSite.rollupShardCount,
 					allowedPropertyKeys: configuredSite.allowedPropertyKeys,
 					deniedPropertyKeys: configuredSite.deniedPropertyKeys,
 				});

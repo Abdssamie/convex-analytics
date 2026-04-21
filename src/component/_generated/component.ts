@@ -263,7 +263,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
     };
     maintenance: {
       cleanupSite: FunctionReference<
-        "mutation",
+        "action",
         "internal",
         {
           limit?: number;
@@ -302,6 +302,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name: string;
           rawEventRetentionDays?: number;
           retentionDays?: number;
+          rollupShardCount?: number;
           sessionTimeoutMs?: number;
           slug: string;
           writeKeyHash: string;
@@ -322,6 +323,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name: string;
           rawEventRetentionDays?: number;
           retentionDays?: number;
+          rollupShardCount?: number;
           sessionTimeoutMs?: number;
           slug: string;
           writeKeyHash: string;
@@ -347,6 +349,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             hourlyRollupRetentionDays?: number;
             rawEventRetentionDays?: number;
             retentionDays: number;
+            rollupShardCount?: number;
             sessionTimeoutMs: number;
           };
           slug: string;
@@ -376,6 +379,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name?: string;
           rawEventRetentionDays?: number;
           retentionDays?: number;
+          rollupShardCount?: number;
           sessionTimeoutMs?: number;
           siteId: string;
           status?: "active" | "disabled";

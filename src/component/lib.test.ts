@@ -9,6 +9,7 @@ async function createSite(overrides?: {
 	slug?: string;
 	writeKeyHash?: string;
 	sessionTimeoutMs?: number;
+	rollupShardCount?: number;
 }) {
 	const t = initConvexTest();
 	const siteId = await t.mutation(api.sites.createSite, {
@@ -17,11 +18,13 @@ async function createSite(overrides?: {
 		name: "Scale Test",
 		writeKeyHash: overrides?.writeKeyHash ?? "write_test",
 		sessionTimeoutMs: overrides?.sessionTimeoutMs,
+		rollupShardCount: overrides?.rollupShardCount ?? 8,
 	});
 	return {
 		t,
 		siteId,
 		writeKeyHash: overrides?.writeKeyHash ?? "write_test",
+		rollupShardCount: overrides?.rollupShardCount ?? 8,
 	};
 }
 
@@ -206,6 +209,7 @@ async function insertCollidingPendingPageviewEvents(
 		now: number;
 		occurredAt: number;
 		targetCount: number;
+		rollupShardCount: number;
 	},
 ) {
 	const byShard = new Map<number, Array<Id<"events">>>();
@@ -221,7 +225,7 @@ async function insertCollidingPendingPageviewEvents(
 			utmSource: "newsletter",
 			utmCampaign: "spring",
 		});
-		const shard = shardForEvent(eventId);
+		const shard = shardForEvent(eventId, args.rollupShardCount);
 		const shardIds = byShard.get(shard) ?? [];
 		shardIds.push(eventId);
 		byShard.set(shard, shardIds);
@@ -576,7 +580,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			},
 		]);
 		const timeseriesBeforeTotals = timeseriesBefore.reduce(
-			(sum, row) => ({
+			(
+				sum: { events: number; pageviews: number; sessions: number; visitors: number },
+				row: { events: number; pageviews: number; sessions: number; visitors: number },
+			) => ({
 				events: sum.events + row.events,
 				pageviews: sum.pageviews + row.pageviews,
 				sessions: sum.sessions + row.sessions,
@@ -757,8 +764,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			to: recentHour + hourMs,
 			interval: "hour",
 		});
-		const oldRows = timeseries.filter((row) => row.bucketStart === oldHour);
-		const recentRows = timeseries.filter((row) => row.bucketStart === recentHour);
+		const oldRows = timeseries.filter(
+			(row: { bucketStart: number }) => row.bucketStart === oldHour,
+		);
+		const recentRows = timeseries.filter(
+			(row: { bucketStart: number }) => row.bucketStart === recentHour,
+		);
 		expect(oldRows).toEqual([
 			{
 				bucketStart: oldHour,
@@ -846,7 +857,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 	});
 
 	test("aggregateEventBatch merges same-shard rollup deltas within batch", async () => {
-		const { t, siteId } = await createSite();
+		const { t, siteId, rollupShardCount } = await createSite();
 		const now = Date.UTC(2026, 0, 11, 12, 0, 0);
 		const bucketStart = floorToBucket(now, hourMs);
 		const { shard, eventIds } = await insertCollidingPendingPageviewEvents(t, {
@@ -854,6 +865,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			now,
 			occurredAt: bucketStart,
 			targetCount: 3,
+			rollupShardCount,
 		});
 
 		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
@@ -927,7 +939,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 	});
 
 	test("aggregateEventBatch patches existing rollup shard once with merged batch totals", async () => {
-		const { t, siteId } = await createSite();
+		const { t, siteId, rollupShardCount } = await createSite();
 		const now = Date.UTC(2026, 0, 11, 14, 0, 0);
 		const bucketStart = floorToBucket(now, hourMs);
 		const { shard, eventIds } = await insertCollidingPendingPageviewEvents(t, {
@@ -935,6 +947,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			now,
 			occurredAt: bucketStart,
 			targetCount: 2,
+			rollupShardCount,
 		});
 		const dayBucketStart = floorToBucket(bucketStart, dayMs);
 
@@ -1132,6 +1145,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 							rawEventRetentionDays: 90,
 							hourlyRollupRetentionDays: 90,
 							dedupeRetentionMs: 24 * 60 * 60 * 1000,
+							rollupShardCount: 1,
 						},
 					createdAt: now,
 					updatedAt: now,

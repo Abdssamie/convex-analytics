@@ -1,4 +1,4 @@
-import { mutationGeneric, queryGeneric } from "convex/server";
+import { actionGeneric, mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component";
@@ -86,6 +86,7 @@ export function exposeApi(
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
+				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
 			},
@@ -102,6 +103,7 @@ export function exposeApi(
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
+					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 				} = args;
@@ -115,6 +117,7 @@ export function exposeApi(
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
+					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 					writeKeyHash: await hashWriteKey(writeKey),
@@ -133,6 +136,7 @@ export function exposeApi(
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
+				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
 			},
@@ -149,6 +153,7 @@ export function exposeApi(
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
+					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 				} = args;
@@ -162,6 +167,7 @@ export function exposeApi(
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
 					dedupeRetentionMs,
+					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
 					writeKeyHash: await hashWriteKey(writeKey),
@@ -180,6 +186,7 @@ export function exposeApi(
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
 				dedupeRetentionMs: v.optional(v.number()),
+				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
 			},
@@ -357,7 +364,7 @@ export function exposeApi(
 				return await ctx.runQuery(component.analytics.listSessions, args);
 			},
 		}),
-		cleanupSite: mutationGeneric({
+		cleanupSite: actionGeneric({
 			args: {
 				siteId: v.optional(v.string()),
 				slug: v.optional(v.string()),
@@ -370,7 +377,7 @@ export function exposeApi(
 					type: "admin",
 					siteId: args.siteId,
 				});
-				return await ctx.runMutation(component.maintenance.cleanupSite, args);
+				return await ctx.runAction(component.maintenance.cleanupSite, args);
 			},
 		}),
 		pruneExpired: mutationGeneric({

@@ -2,15 +2,15 @@ import { cronJobs } from "convex/server";
 import type { FunctionReference } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component";
 
-type RunMutationCtx = {
-	runMutation: (
+type RunActionCtx = {
+	runAction: (
 		ref: unknown,
 		args: Record<string, unknown>,
 	) => Promise<unknown>;
 };
 
 export async function runCleanupSite(
-	ctx: RunMutationCtx,
+	ctx: RunActionCtx,
 	component: ComponentApi,
 	args: {
 		siteId?: string;
@@ -20,11 +20,16 @@ export async function runCleanupSite(
 		runUntilComplete?: boolean;
 	},
 ) {
-	return await ctx.runMutation(component.maintenance.cleanupSite, args);
+	return await ctx.runAction(component.maintenance.cleanupSite, args);
 }
 
 export async function runPruneExpired(
-	ctx: RunMutationCtx,
+	ctx: {
+		runMutation: (
+			ref: unknown,
+			args: Record<string, unknown>,
+		) => Promise<unknown>;
+	},
 	component: ComponentApi,
 	args: {
 		now?: number;
@@ -82,6 +87,7 @@ export function registerDefaultAnalyticsCrons(
 			siteId: options.siteId,
 			slug: options.slug,
 			limit,
+			runUntilComplete: true,
 		},
 	);
 	crons.interval(

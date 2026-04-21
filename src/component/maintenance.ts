@@ -1,10 +1,18 @@
-import { mutation } from "./_generated/server";
-import type { MutationCtx } from "./_generated/server";
+import {
+	action,
+	internalMutation,
+	internalQuery,
+	mutation,
+} from "./_generated/server";
+import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import type { IdOfSite } from "./types";
 import { cleanupBatchLimit } from "./constants";
-import { resolveSite, daysToMs, deleteRows } from "./helpers";
+import { daysToMs, deleteRows } from "./helpers";
+import { siteValidator } from "./types";
+
+const cleanupPageSize = 100;
 
 export const pruneExpired = mutation({
 	args: {
@@ -26,7 +34,8 @@ export const pruneExpired = mutation({
 		return deleted;
 	},
 });
-export const cleanupSite = mutation({
+
+export const cleanupSite = action({
 	args: {
 		siteId: v.optional(v.id("sites")),
 		slug: v.optional(v.string()),
@@ -40,10 +49,33 @@ export const cleanupSite = mutation({
 		dailyRollupShards: v.number(),
 		hasMore: v.boolean(),
 	}),
-	handler: async (ctx, args) => {
-		const site = await resolveSite(ctx, args);
+	handler: async (
+		ctx,
+		args,
+	): Promise<{
+		events: number;
+		hourlyRollupShards: number;
+		dailyRollupShards: number;
+		hasMore: boolean;
+	}> => {
+		const site: {
+			_id: IdOfSite;
+			settings: {
+				retentionDays: number;
+				rawEventRetentionDays?: number;
+				hourlyRollupRetentionDays?: number;
+				dailyRollupRetentionDays?: number;
+			};
+		} = await ctx.runQuery(internal.maintenance.resolveSiteForCleanup, {
+			siteId: args.siteId,
+			slug: args.slug,
+		});
 		const now = args.now ?? Date.now();
-		const limit = Math.min(args.limit ?? cleanupBatchLimit, 500);
+		const limit = Math.max(
+			1,
+			Math.min(args.limit ?? cleanupBatchLimit, 500),
+		);
+		const runUntilComplete = args.runUntilComplete ?? true;
 		const rawEventCutoff =
 			now -
 			daysToMs(
@@ -58,35 +90,36 @@ export const cleanupSite = mutation({
 			site.settings.dailyRollupRetentionDays === undefined
 				? null
 				: now - daysToMs(site.settings.dailyRollupRetentionDays);
-		const activeCategories = dailyRollupCutoff === null ? 3 : 4;
-		const perCategoryLimit = Math.max(1, Math.floor(limit / activeCategories));
 
-		const events = await deleteDoneEventsBefore(ctx, {
+		const events = await deleteDoneEventsBudget(ctx, {
 			siteId: site._id,
 			cutoff: rawEventCutoff,
-			limit: perCategoryLimit,
+			limit,
 		});
-		const hourlyRollupShards = await deleteRollupShardsBefore(ctx, {
+		const hourlyBudget = Math.max(0, limit - events.deleted);
+		const hourlyRollupShards = await deleteRollupShardsBudget(ctx, {
 			siteId: site._id,
 			interval: "hour",
 			cutoff: hourlyRollupCutoff,
-			limit: perCategoryLimit,
+			limit: hourlyBudget,
 		});
-		const dailyRollupShards =
+		const dailyBudget = Math.max(
+			0,
+			limit - events.deleted - hourlyRollupShards.deleted,
+		);
+		const dailyRollupShards: { deleted: number; hasMore: boolean } =
 			dailyRollupCutoff === null
-				? 0
-				: await deleteRollupShardsBefore(ctx, {
+				? { deleted: 0, hasMore: false }
+				: await deleteRollupShardsBudget(ctx, {
 						siteId: site._id,
 						interval: "day",
 						cutoff: dailyRollupCutoff,
-						limit: perCategoryLimit,
+						limit: dailyBudget,
 					});
 
 		const hasMore =
-			events === perCategoryLimit ||
-			hourlyRollupShards === perCategoryLimit ||
-			dailyRollupShards === perCategoryLimit;
-		if (hasMore && args.runUntilComplete) {
+			events.hasMore || hourlyRollupShards.hasMore || dailyRollupShards.hasMore;
+		if (hasMore && runUntilComplete) {
 			await ctx.scheduler.runAfter(0, api.maintenance.cleanupSite, {
 				siteId: site._id,
 				now,
@@ -94,14 +127,197 @@ export const cleanupSite = mutation({
 				runUntilComplete: true,
 			});
 		}
+
 		return {
-			events,
-			hourlyRollupShards,
-			dailyRollupShards,
+			events: events.deleted,
+			hourlyRollupShards: hourlyRollupShards.deleted,
+			dailyRollupShards: dailyRollupShards.deleted,
 			hasMore,
 		};
 	},
 });
+
+export const resolveSiteForCleanup = internalQuery({
+	args: {
+		siteId: v.optional(v.id("sites")),
+		slug: v.optional(v.string()),
+	},
+	returns: siteValidator,
+	handler: async (ctx, args) => {
+		if (args.siteId) {
+			const site = await ctx.db.get(args.siteId);
+			if (!site) {
+				throw new Error("Site not found");
+			}
+			return site;
+		}
+
+		if (args.slug) {
+			const site = await ctx.db
+				.query("sites")
+				.withIndex("by_slug", (q) => q.eq("slug", args.slug!))
+				.unique();
+			if (!site) {
+				throw new Error("Site not found");
+			}
+			return site;
+		}
+
+		throw new Error("siteId or slug is required");
+	},
+});
+
+export const deleteDoneEventsPage = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+		cutoff: v.number(),
+		cursor: v.union(v.string(), v.null()),
+		limit: v.optional(v.number()),
+	},
+	returns: v.object({
+		deleted: v.number(),
+		continueCursor: v.union(v.string(), v.null()),
+		isDone: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const page = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("aggregationStatus", "done")
+					.lt("occurredAt", args.cutoff),
+			)
+			.paginate({
+				numItems: Math.max(
+					1,
+					Math.min(args.limit ?? cleanupPageSize, cleanupPageSize),
+				),
+				cursor: args.cursor,
+			});
+		await deleteRows(ctx, page.page);
+		return {
+			deleted: page.page.length,
+			continueCursor: page.isDone ? null : page.continueCursor,
+			isDone: page.isDone,
+		};
+	},
+});
+
+export const deleteRollupShardsPage = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+		interval: v.union(v.literal("hour"), v.literal("day")),
+		cutoff: v.number(),
+		cursor: v.union(v.string(), v.null()),
+		limit: v.optional(v.number()),
+	},
+	returns: v.object({
+		deleted: v.number(),
+		continueCursor: v.union(v.string(), v.null()),
+		isDone: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const page = await ctx.db
+			.query("rollupShards")
+			.withIndex("by_site_interval_bucket", (q) =>
+				q
+					.eq("siteId", args.siteId)
+					.eq("interval", args.interval)
+					.lt("bucketStart", args.cutoff),
+			)
+			.paginate({
+				numItems: Math.max(
+					1,
+					Math.min(args.limit ?? cleanupPageSize, cleanupPageSize),
+				),
+				cursor: args.cursor,
+			});
+		await deleteRows(ctx, page.page);
+		return {
+			deleted: page.page.length,
+			continueCursor: page.isDone ? null : page.continueCursor,
+			isDone: page.isDone,
+		};
+	},
+});
+
+async function deleteDoneEventsBudget(
+	ctx: ActionCtx,
+	args: {
+		siteId: IdOfSite;
+		cutoff: number;
+		limit: number;
+	},
+) {
+	let deleted = 0;
+	let cursor: string | null = null;
+	if (args.limit <= 0) {
+		return { deleted: 0, hasMore: false };
+	}
+	while (true) {
+		const remaining = args.limit - deleted;
+		if (remaining <= 0) {
+			return { deleted, hasMore: true };
+		}
+		const page: {
+			deleted: number;
+			continueCursor: string | null;
+			isDone: boolean;
+		} = await ctx.runMutation(internal.maintenance.deleteDoneEventsPage, {
+			siteId: args.siteId,
+			cutoff: args.cutoff,
+			cursor,
+			limit: remaining,
+		});
+		deleted += page.deleted;
+		if (page.isDone) {
+			return { deleted, hasMore: false };
+		}
+		cursor = page.continueCursor;
+	}
+}
+
+async function deleteRollupShardsBudget(
+	ctx: ActionCtx,
+	args: {
+		siteId: IdOfSite;
+		interval: "hour" | "day";
+		cutoff: number;
+		limit: number;
+	},
+) {
+	let deleted = 0;
+	let cursor: string | null = null;
+	if (args.limit <= 0) {
+		return { deleted: 0, hasMore: false };
+	}
+	while (true) {
+		const remaining = args.limit - deleted;
+		if (remaining <= 0) {
+			return { deleted, hasMore: true };
+		}
+		const page: {
+			deleted: number;
+			continueCursor: string | null;
+			isDone: boolean;
+		} = await ctx.runMutation(
+			internal.maintenance.deleteRollupShardsPage,
+			{
+				siteId: args.siteId,
+				interval: args.interval,
+				cutoff: args.cutoff,
+				cursor,
+				limit: remaining,
+			},
+		);
+		deleted += page.deleted;
+		if (page.isDone) {
+			return { deleted, hasMore: false };
+		}
+		cursor = page.continueCursor;
+	}
+}
 
 export async function deleteDoneEventsBefore(
 	ctx: MutationCtx,

@@ -17,6 +17,7 @@ export default defineSchema({
 			hourlyRollupRetentionDays: v.optional(v.number()),
 			dailyRollupRetentionDays: v.optional(v.number()),
 			dedupeRetentionMs: v.optional(v.number()),
+			rollupShardCount: v.optional(v.number()),
 			allowedPropertyKeys: v.optional(v.array(v.string())),
 			deniedPropertyKeys: v.optional(v.array(v.string())),
 		}),

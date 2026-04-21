@@ -23,6 +23,7 @@ export type SiteConfig = {
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
 	dedupeRetentionMs?: number;
+	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
 };

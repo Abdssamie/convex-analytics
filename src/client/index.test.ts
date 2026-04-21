@@ -62,7 +62,7 @@ describe("client helpers", () => {
 			crons,
 			{
 				cleanupSite: makeFunctionReference<
-					"mutation",
+					"action",
 					{
 						siteId?: string;
 						slug?: string;

@@ -333,7 +333,10 @@ export async function aggregateEventsByIds(
 				receivedAt: now,
 				newSession: session.created,
 				newVisitor: visitor.created,
-				shard: shardForEvent(event._id),
+				shard: shardForEvent(
+					event._id,
+					site.settings.rollupShardCount ?? defaultSettings.rollupShardCount,
+				),
 			});
 			await ctx.db.patch(event._id, {
 				contributesSession: session.created,
