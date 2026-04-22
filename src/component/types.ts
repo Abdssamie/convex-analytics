@@ -23,7 +23,6 @@ export const eventInputValidator = v.object({
 	referrer: v.optional(v.string()),
 	properties: propertiesValidator,
 	userId: v.optional(v.string()),
-	eventId: v.optional(v.string()),
 });
 export const contextValidator = v.optional(
 	v.object({
@@ -51,7 +50,6 @@ export const siteValidator = v.object({
 		rawEventRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
-		dedupeRetentionMs: v.optional(v.number()),
 		rollupShardCount: v.optional(v.number()),
 		allowedPropertyKeys: v.optional(v.array(v.string())),
 		deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -82,7 +80,6 @@ export const eventValidator = v.object({
 	utmCampaign: v.optional(v.string()),
 	properties: propertiesValidator,
 	identifiedUserId: v.optional(v.string()),
-	dedupeKey: v.optional(v.string()),
 	aggregatedAt: v.optional(v.union(v.number(), v.null())),
 });
 export const sessionValidator = v.object({
@@ -142,7 +139,6 @@ export type SiteSettingsArgs = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
 	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
@@ -154,7 +150,6 @@ export type SiteSettings = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
 	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];

@@ -71,20 +71,10 @@ describe("client helpers", () => {
 						runUntilComplete?: boolean;
 					}
 				>("cleanup:site"),
-				pruneExpired: makeFunctionReference<
-					"mutation",
-					{
-						now?: number;
-						limit?: number;
-					}
-				>("cleanup:dedupes"),
 			},
 			{ slug: "default" },
 		);
 		expect(crons.crons["analytics cleanup"]).toMatchObject({
-			schedule: { type: "interval", hours: 6 },
-		});
-		expect(crons.crons["analytics dedupe cleanup"]).toMatchObject({
 			schedule: { type: "interval", hours: 6 },
 		});
 	});

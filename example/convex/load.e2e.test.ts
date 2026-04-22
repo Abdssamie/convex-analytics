@@ -15,14 +15,12 @@ function buildVisitorBatch(args: {
 			{
 				type: "identify" as const,
 				occurredAt: args.base,
-				eventId: `identify-${args.index}`,
 				userId: `user-${args.index}`,
 				properties: { plan },
 			},
 			{
 				type: "pageview" as const,
 				occurredAt: args.base + 1_000,
-				eventId: `page-home-${args.index}`,
 				path: "/",
 				title: "Home",
 				referrer: "https://app.example.com/",
@@ -31,14 +29,12 @@ function buildVisitorBatch(args: {
 				type: "track" as const,
 				name: "plan_selected",
 				occurredAt: args.base + 2_000,
-				eventId: `track-${args.index}`,
 				path: "/pricing",
 				properties: { plan },
 			},
 			{
 				type: "pageview" as const,
 				occurredAt: args.base + 3_000,
-				eventId: `page-pricing-${args.index}`,
 				path: "/pricing",
 				title: "Pricing",
 				referrer: "https://app.example.com/",
@@ -83,7 +79,6 @@ describe("example app integration under high event volume", () => {
 				});
 				expect(result).toEqual({
 					accepted: 4,
-					duplicate: 0,
 					rejected: 0,
 				});
 			}

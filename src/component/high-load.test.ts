@@ -25,14 +25,12 @@ function buildVisitorLoad(args: {
 			{
 				type: "identify" as const,
 				occurredAt: args.base,
-				eventId: `identify-${args.visitorIndex}`,
 				userId: `user-${args.visitorIndex}`,
 				properties: identifyProperties,
 			},
 			{
 				type: "pageview" as const,
 				occurredAt: args.base + 1_000,
-				eventId: `page-home-${args.visitorIndex}`,
 				path: "/",
 				title: "Home",
 				referrer: "https://app.example.com/",
@@ -41,14 +39,12 @@ function buildVisitorLoad(args: {
 				type: "track" as const,
 				name: "plan_selected",
 				occurredAt: args.base + 2_000,
-				eventId: `plan-a-${args.visitorIndex}`,
 				path: "/pricing",
 				properties: trackProperties,
 			},
 			{
 				type: "pageview" as const,
 				occurredAt: args.base + 3_000,
-				eventId: `page-pricing-${args.visitorIndex}`,
 				path: "/pricing",
 				title: "Pricing",
 				referrer: "https://app.example.com/",
@@ -57,7 +53,6 @@ function buildVisitorLoad(args: {
 				type: "track" as const,
 				name: "plan_selected",
 				occurredAt: args.base + 4_000,
-				eventId: `plan-b-${args.visitorIndex}`,
 				path: "/checkout",
 				properties: trackProperties,
 			},
@@ -106,7 +101,6 @@ describe("analytics high-load correctness", () => {
 				});
 				expect(result).toEqual({
 					accepted: 5,
-					duplicate: 0,
 					rejected: 0,
 				});
 			}

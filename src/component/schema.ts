@@ -16,7 +16,6 @@ export default defineSchema({
 			rawEventRetentionDays: v.optional(v.number()),
 			hourlyRollupRetentionDays: v.optional(v.number()),
 			dailyRollupRetentionDays: v.optional(v.number()),
-			dedupeRetentionMs: v.optional(v.number()),
 			rollupShardCount: v.optional(v.number()),
 			allowedPropertyKeys: v.optional(v.array(v.string())),
 			deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -95,7 +94,6 @@ export default defineSchema({
 		utmCampaign: v.optional(v.string()),
 		properties: v.optional(v.record(v.string(), propertyValue)),
 		identifiedUserId: v.optional(v.string()),
-		dedupeKey: v.optional(v.string()),
 		aggregatedAt: v.optional(v.union(v.number(), v.null())),
 	})
 		.index("by_siteId_and_occurredAt", ["siteId", "occurredAt"])
@@ -148,12 +146,4 @@ export default defineSchema({
 			"bucketStart",
 		])
 		.index("by_site_interval_bucket", ["siteId", "interval", "bucketStart"]),
-
-	ingestDedupes: defineTable({
-		siteId: v.id("sites"),
-		dedupeKey: v.string(),
-		expiresAt: v.number(),
-	})
-		.index("by_siteId_and_dedupeKey", ["siteId", "dedupeKey"])
-		.index("by_expiresAt", ["expiresAt"]),
 });

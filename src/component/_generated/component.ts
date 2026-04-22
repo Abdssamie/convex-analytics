@@ -130,7 +130,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             _creationTime: number;
             _id: string;
             aggregatedAt?: number | null;
-            dedupeKey?: string;
             eventName: string;
             eventType: "pageview" | "track" | "identify";
             identifiedUserId?: string;
@@ -218,7 +217,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             utmSource?: string;
           };
           events: Array<{
-            eventId?: string;
             name?: string;
             occurredAt?: number;
             path?: string;
@@ -233,7 +231,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           visitorId: string;
           writeKeyHash: string;
         },
-        { accepted: number; duplicate: number; rejected: number },
+        { accepted: number; rejected: number },
         Name
       >;
     };
@@ -256,13 +254,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
-      pruneExpired: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; now?: number },
-        number,
-        Name
-      >;
     };
     sites: {
       createSite: FunctionReference<
@@ -272,7 +263,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
           dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name: string;
@@ -299,7 +289,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           settings: {
             allowedPropertyKeys?: Array<string>;
             dailyRollupRetentionDays?: number;
-            dedupeRetentionMs?: number;
             deniedPropertyKeys?: Array<string>;
             hourlyRollupRetentionDays?: number;
             rawEventRetentionDays?: number;
@@ -328,7 +317,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
           dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name?: string;

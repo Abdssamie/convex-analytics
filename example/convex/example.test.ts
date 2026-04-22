@@ -35,7 +35,7 @@ describe("example", () => {
       visitorId: "visitor-1",
       sessionId: "session-1",
       events: [
-        { type: "pageview", path: "/", occurredAt: now, eventId: "event-1" },
+        { type: "pageview", path: "/", occurredAt: now },
       ],
     });
     expect(result.accepted).toBe(1);

@@ -1,9 +1,4 @@
-import {
-	action,
-	internalMutation,
-	internalQuery,
-	mutation,
-} from "./_generated/server";
+import { action, internalMutation, internalQuery } from "./_generated/server";
 import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
@@ -13,27 +8,6 @@ import { daysToMs, deleteRows } from "./helpers";
 import { siteValidator } from "./types";
 
 const cleanupPageSize = 100;
-
-export const pruneExpired = mutation({
-	args: {
-		now: v.optional(v.number()),
-		limit: v.optional(v.number()),
-	},
-	returns: v.number(),
-	handler: async (ctx, args) => {
-		const now = args.now ?? Date.now();
-		const rows = await ctx.db
-			.query("ingestDedupes")
-			.withIndex("by_expiresAt", (q) => q.lte("expiresAt", now))
-			.take(Math.min(args.limit ?? 100, 500));
-		let deleted = 0;
-		for (const row of rows) {
-			await ctx.db.delete(row._id);
-			deleted += 1;
-		}
-		return deleted;
-	},
-});
 
 export const cleanupSite = action({
 	args: {

@@ -8,7 +8,6 @@ registerDefaultAnalyticsCrons(
   crons,
   {
     cleanupSite: internal.cleanup.site,
-    pruneExpired: internal.cleanup.dedupes,
   },
   {
     slug: "default",

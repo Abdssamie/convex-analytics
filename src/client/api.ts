@@ -49,7 +49,6 @@ export function exposeAdminApi(
 		rotateWriteKey,
 		getSiteBySlug,
 		cleanupSite,
-		pruneExpired,
 	} = exposeApi(component, options);
 	return {
 		createSite,
@@ -57,7 +56,6 @@ export function exposeAdminApi(
 		rotateWriteKey,
 		getSiteBySlug,
 		cleanupSite,
-		pruneExpired,
 	};
 }
 
@@ -79,7 +77,6 @@ export function exposeApi(
 				rawEventRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
 				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -96,7 +93,6 @@ export function exposeApi(
 					rawEventRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
-					dedupeRetentionMs,
 					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
@@ -110,7 +106,6 @@ export function exposeApi(
 					rawEventRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
-					dedupeRetentionMs,
 					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
@@ -129,7 +124,6 @@ export function exposeApi(
 				rawEventRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
 				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -294,16 +288,6 @@ export function exposeApi(
 					siteId: args.siteId,
 				});
 				return await ctx.runAction(component.maintenance.cleanupSite, args);
-			},
-		}),
-		pruneExpired: mutationGeneric({
-			args: {
-				now: v.optional(v.number()),
-				limit: v.optional(v.number()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, { type: "admin" });
-				return await ctx.runMutation(component.maintenance.pruneExpired, args);
 			},
 		}),
 	};

@@ -27,14 +27,12 @@ The component owns its own Convex tables:
 - `sessions`: session windows and coarse device/source summary
 - `events`: append-only raw events with lightweight aggregation marker
 - `rollupShards`: sharded hourly/daily report counters
-- `ingestDedupes`: short-lived retry/idempotency cache
 
 ```mermaid
 flowchart LR
     Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
     Http --> Ingest["ingestBatch\nappend-only raw event insert"]
     Ingest --> Events[("events")]
-    Ingest --> Dedupe[("ingestDedupes")]
     Ingest --> Worker["aggregateEventBatch"]
     Worker --> Visitors[("visitors")]
     Worker --> Sessions[("sessions")]
@@ -135,14 +133,11 @@ Add default maintenance wrappers once:
 ```ts
 // convex/cleanup.ts
 import { components } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import {
-  runCleanupSite,
-  runPruneExpired,
-} from "@Abdssamie/convex-analytics";
+import { runCleanupSite } from "@Abdssamie/convex-analytics";
 
-export const site = internalMutation({
+export const site = internalAction({
   args: {
     siteId: v.optional(v.string()),
     slug: v.optional(v.string()),
@@ -152,16 +147,6 @@ export const site = internalMutation({
   },
   handler: async (ctx, args) => {
     return await runCleanupSite(ctx, components.convexAnalytics, args);
-  },
-});
-
-export const dedupes = internalMutation({
-  args: {
-    now: v.optional(v.number()),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    return await runPruneExpired(ctx, components.convexAnalytics, args);
   },
 });
 ```
@@ -180,7 +165,6 @@ registerDefaultAnalyticsCrons(
   crons,
   {
     cleanupSite: internal.cleanup.site,
-    pruneExpired: internal.cleanup.dedupes,
   },
   {
     slug: "default",
@@ -259,7 +243,6 @@ export const {
   updateSite,
   rotateWriteKey,
   cleanupSite,
-  pruneExpired,
 } = exposeAdminApi(components.convexAnalytics, {
   auth: async (ctx, operation) => {
     // admin auth / site ownership check here
@@ -271,7 +254,6 @@ Admin surface:
 
 - `createSite`, `updateSite`, `rotateWriteKey`
 - `cleanupSite(siteId? | slug?, now?, limit?, runUntilComplete?)`
-- `pruneExpired(now?, limit?)`
 
 Recommended dashboard shape:
 
@@ -295,7 +277,6 @@ Retention is configured per site. Defaults are cost-conscious:
 - raw `events`: 90 days
 - hourly `rollupShards`: 90 days
 - daily `rollupShards`: kept indefinitely
-- `ingestDedupes`: 24 hours from insertion
 
 `retentionDays` is shared default for raw events and hourly rollups. Override
 specific fields when needed:
@@ -329,16 +310,6 @@ export const site = internalMutation({
     });
   },
 });
-
-export const dedupes = internalMutation({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(
-      components.convexAnalytics.maintenance.pruneExpired,
-      args,
-    );
-  },
-});
 ```
 
 Then schedule them:
@@ -355,13 +326,6 @@ crons.interval(
   { hours: 6 },
   internal.cleanup.site,
   { slug: "default", limit: 100 },
-);
-
-crons.interval(
-  "analytics dedupe cleanup",
-  { hours: 6 },
-  internal.cleanup.dedupes,
-  { limit: 100 },
 );
 
 export default crons;
@@ -407,7 +371,6 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Browser events are batched.
 - Raw events are slim.
 - Write keys are hashed before reaching component storage.
-- Retry dedupe prevents duplicate event inserts.
 - Ingest does not patch report counters inline.
 - Reports use sharded hourly/daily rollups for common analytics queries.
 - Old rollup shard fanout is compacted in background.

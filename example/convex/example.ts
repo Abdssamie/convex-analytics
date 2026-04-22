@@ -21,7 +21,6 @@ export const {
   rotateWriteKey,
   getSiteBySlug,
   cleanupSite,
-  pruneExpired,
 } = exposeAdminApi(components.convexAnalytics, {
   auth: async () => {},
 });
@@ -80,7 +79,6 @@ export const ingestExampleBatch = mutation({
           ),
         ),
         userId: v.optional(v.string()),
-        eventId: v.optional(v.string()),
       }),
     ),
   },

@@ -30,12 +30,11 @@ export const ingestBatch = mutation({
 	},
 	returns: v.object({
 		accepted: v.number(),
-		duplicate: v.number(),
 		rejected: v.number(),
 	}),
 	handler: async (ctx, args) => {
 		if (args.events.length === 0) {
-			return { accepted: 0, duplicate: 0, rejected: 0 };
+			return { accepted: 0, rejected: 0 };
 		}
 		if (args.events.length > maxBatchSize) {
 			throw new Error(`Batch too large. Max ${maxBatchSize} events.`);
@@ -60,7 +59,6 @@ export const ingestBatch = mutation({
 
 		const receivedAt = Date.now();
 		let accepted = 0;
-		let duplicate = 0;
 		let rejected = 0;
 		let identifiedUserId: string | undefined;
 		const insertedEventIds: Array<Id<"events">> = [];
@@ -71,29 +69,6 @@ export const ingestBatch = mutation({
 			if (!eventName) {
 				rejected += 1;
 				continue;
-			}
-			const dedupeKey =
-				event.eventId ??
-				`${args.visitorId}:${args.sessionId}:${occurredAt}:${event.type}:${eventName}:${event.path ?? ""}`;
-			const duplicateDedupe = await ctx.db
-				.query("ingestDedupes")
-				.withIndex("by_siteId_and_dedupeKey", (q) =>
-					q.eq("siteId", site._id).eq("dedupeKey", dedupeKey),
-				)
-				.unique();
-			if (duplicateDedupe && duplicateDedupe.expiresAt > receivedAt) {
-				duplicate += 1;
-				continue;
-			}
-			if (!duplicateDedupe) {
-				await ctx.db.insert("ingestDedupes", {
-					siteId: site._id,
-					dedupeKey,
-					expiresAt:
-						receivedAt +
-						(site.settings.dedupeRetentionMs ??
-							defaultSettings.dedupeRetentionMs),
-				});
 			}
 
 			const properties = sanitizeProperties(event.properties, site.settings);
@@ -118,7 +93,6 @@ export const ingestBatch = mutation({
 				utmCampaign: args.context?.utmCampaign,
 				properties,
 				identifiedUserId,
-				dedupeKey,
 				aggregatedAt: null,
 			});
 			insertedEventIds.push(eventDbId);
@@ -133,7 +107,7 @@ export const ingestBatch = mutation({
 			});
 		}
 
-		return { accepted, duplicate, rejected };
+		return { accepted, rejected };
 	},
 });
 export const aggregateEventBatch = internalMutation({

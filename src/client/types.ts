@@ -18,7 +18,6 @@ export type AnalyticsEvent =
 			title?: string;
 			referrer?: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  }
 	| {
@@ -26,14 +25,12 @@ export type AnalyticsEvent =
 			name: string;
 			path?: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  }
 	| {
 			type: "identify";
 			userId: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  };
 export type AnalyticsProperties = Record<
@@ -59,5 +56,4 @@ export type IngestEventInput = {
 	referrer?: string;
 	properties?: AnalyticsProperties;
 	userId?: string;
-	eventId?: string;
 };

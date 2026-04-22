@@ -34,10 +34,6 @@ export function siteSettingsFromArgs(
 			retentionDays,
 		dailyRollupRetentionDays:
 			args.dailyRollupRetentionDays ?? existing?.dailyRollupRetentionDays,
-		dedupeRetentionMs:
-			args.dedupeRetentionMs ??
-			existing?.dedupeRetentionMs ??
-			defaultSettings.dedupeRetentionMs,
 		rollupShardCount,
 		allowedPropertyKeys:
 			args.allowedPropertyKeys ?? existing?.allowedPropertyKeys,
@@ -52,7 +48,6 @@ export function sameSiteSettings(left: SiteSettings, right: SiteSettings) {
 		left.rawEventRetentionDays === right.rawEventRetentionDays &&
 		left.hourlyRollupRetentionDays === right.hourlyRollupRetentionDays &&
 		left.dailyRollupRetentionDays === right.dailyRollupRetentionDays &&
-		left.dedupeRetentionMs === right.dedupeRetentionMs &&
 		left.rollupShardCount === right.rollupShardCount &&
 		sameOptionalStringArray(
 			left.allowedPropertyKeys,
