@@ -3,7 +3,10 @@
   "compilerOptions": {
     "types": ["vitest/globals"],
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "rootDir": ".",
+    "outDir": "./.tsbuild-test"
   },
-  "include": ["src/**/*", "example/**/*"]
+  "include": ["src/**/*", "example/**/*"],
+  "exclude": ["perf/playwright/**/*"]
 }

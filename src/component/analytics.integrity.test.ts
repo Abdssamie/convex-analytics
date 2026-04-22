@@ -15,24 +15,19 @@ describe("analytics integrity regressions", () => {
 			});
 			const firstBucketStart = Date.UTC(2026, 0, 7, 0, 0, 0);
 			const rowCount = 12_001;
-			const shardsPerBucket = 6;
-
 			await t.run(async (ctx) => {
-				for (let index = 0; index < rowCount; index += 1) {
-					await ctx.db.insert("rollupShards", {
-						siteId,
-						interval: "hour",
-						bucketStart: firstBucketStart,
-						dimension: "overview",
-						key: "all",
-						shard: index % shardsPerBucket,
-						count: 1,
-						pageviewCount: 1,
-						bounceCount: 0,
-						durationMs: 0,
-						updatedAt: firstBucketStart + index,
-					});
-				}
+				await ctx.db.insert("rollups", {
+					siteId,
+					interval: "hour",
+					bucketStart: firstBucketStart,
+					dimension: "overview",
+					key: "all",
+					count: rowCount,
+					pageviewCount: rowCount,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: firstBucketStart,
+				});
 			});
 
 			const from = firstBucketStart;
@@ -82,26 +77,24 @@ describe("analytics integrity regressions", () => {
 			const prefixEnd = queryFrom;
 
 			await t.run(async (ctx) => {
-				await ctx.db.insert("rollupShards", {
+				await ctx.db.insert("rollups", {
 					siteId,
 					interval: "hour",
 					bucketStart,
 					dimension: "utmSource",
 					key: "newsletter",
-					shard: 0,
 					count: 36_000,
 					pageviewCount: 0,
 					bounceCount: 0,
 					durationMs: 0,
 					updatedAt: bucketStart,
 				});
-				await ctx.db.insert("rollupShards", {
+				await ctx.db.insert("rollups", {
 					siteId,
 					interval: "hour",
 					bucketStart,
 					dimension: "utmSource",
 					key: "ads",
-					shard: 0,
 					count: 12_000,
 					pageviewCount: 0,
 					bounceCount: 0,
@@ -163,13 +156,12 @@ describe("analytics integrity regressions", () => {
 			const queryTo = bucketStart + hourMs;
 
 			await t.run(async (ctx) => {
-				await ctx.db.insert("rollupShards", {
+				await ctx.db.insert("rollups", {
 					siteId,
 					interval: "hour",
 					bucketStart,
 					dimension: "overview",
 					key: "all",
-					shard: 0,
 					count: 36_000,
 					pageviewCount: 24_000,
 					bounceCount: 0,

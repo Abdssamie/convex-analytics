@@ -61,8 +61,8 @@ describe("maintenance cleanup", () => {
 		});
 		expect(result).toEqual({
 			events: 100,
-			hourlyRollupShards: 0,
-			dailyRollupShards: 0,
+			hourlyRollups: 0,
+			dailyRollups: 0,
 			hasMore: true,
 		});
 
@@ -110,11 +110,10 @@ describe("maintenance cleanup", () => {
 			}
 
 			for (let index = 0; index < 60; index += 1) {
-				await ctx.db.insert("rollupShards", {
+				await ctx.db.insert("rollups", {
 					siteId,
 					interval: "hour",
 					bucketStart: oldOccurredAt - index * dayMs,
-					shard: index,
 					dimension: "event",
 					key: `hour-${index}`,
 					count: 1,
@@ -126,11 +125,10 @@ describe("maintenance cleanup", () => {
 			}
 
 			for (let index = 0; index < 60; index += 1) {
-				await ctx.db.insert("rollupShards", {
+				await ctx.db.insert("rollups", {
 					siteId,
 					interval: "day",
 					bucketStart: oldOccurredAt - index * dayMs,
-					shard: index,
 					dimension: "event",
 					key: `day-${index}`,
 					count: 1,
@@ -150,8 +148,8 @@ describe("maintenance cleanup", () => {
 		});
 		expect(result).toEqual({
 			events: 60,
-			hourlyRollupShards: 40,
-			dailyRollupShards: 0,
+			hourlyRollups: 40,
+			dailyRollups: 0,
 			hasMore: true,
 		});
 	});

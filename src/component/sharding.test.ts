@@ -4,7 +4,6 @@ import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
 import { floorToBucket } from "./helpers.js";
 import { hourMs } from "./constants.js";
-import { aggregateEventsByIds } from "./ingest.js";
 
 async function insertPendingPageviewEvents(
 	t: ReturnType<typeof initConvexTest>,
@@ -46,7 +45,7 @@ async function getOverviewRowsForBucket(
 ) {
 	return await t.run(async (ctx) => {
 		return await ctx.db
-			.query("rollupShards")
+			.query("rollups")
 			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)
@@ -63,17 +62,26 @@ async function aggregatePendingEvents(
 	t: ReturnType<typeof initConvexTest>,
 	eventIds: Array<Id<"events">>,
 ) {
-	return await t.run(async (ctx) => {
-		return await aggregateEventsByIds(ctx as never, eventIds);
+	const siteId = await t.run(async (ctx) => {
+		const event = await ctx.db.get(eventIds[0]!);
+		if (!event) {
+			throw new Error("Event not found");
+		}
+		return event.siteId;
 	});
+	const result = await t.mutation(internal.ingest.reducePendingSiteEvents, {
+		siteId,
+	});
+	await t.finishAllScheduledFunctions(() => {});
+	return result;
 }
 
-describe("rollup shard count", () => {
-	test("sites default to one rollup shard and only write shard zero", async () => {
+describe("rollups", () => {
+	test("sites create a single rollup row per bucket key", async () => {
 		const t = initConvexTest();
 		const siteId = await t.mutation(api.sites.createSite, {
 			slug: `site-${Math.random().toString(36).slice(2, 8)}`,
-			name: "Default Shards",
+			name: "Rollup Site",
 			writeKeyHash: "write_test_default",
 		});
 		const now = Date.UTC(2026, 0, 21, 12, 0, 0);
@@ -87,34 +95,45 @@ describe("rollup shard count", () => {
 
 		await aggregatePendingEvents(t, eventIds);
 
-		const site = await t.run(async (ctx) => await ctx.db.get(siteId));
 		const rows = await getOverviewRowsForBucket(t, { siteId, bucketStart });
-		expect(site?.settings.rollupShardCount).toBe(1);
 		expect(rows).toHaveLength(1);
-		expect(rows[0]?.shard).toBe(0);
+		expect(rows[0]).toMatchObject({
+			count: 12,
+			pageviewCount: 12,
+		});
 	});
 
-	test("sites can opt into wider shard fanout", async () => {
+	test("re-running aggregation adds into the existing rollup row", async () => {
 		const t = initConvexTest();
 		const siteId = await t.mutation(api.sites.createSite, {
 			slug: `site-${Math.random().toString(36).slice(2, 8)}`,
-			name: "Wide Shards",
-			writeKeyHash: "write_test_wide",
-			rollupShardCount: 8,
+			name: "Rollup Updates",
+			writeKeyHash: "write_test_update",
 		});
 		const now = Date.UTC(2026, 0, 21, 13, 0, 0);
 		const bucketStart = floorToBucket(now, hourMs);
-		const eventIds = await insertPendingPageviewEvents(t, {
+
+		const firstBatch = await insertPendingPageviewEvents(t, {
 			siteId,
 			now,
 			bucketStart,
-			totalEvents: 24,
+			totalEvents: 10,
 		});
+		await aggregatePendingEvents(t, firstBatch);
 
-		await aggregatePendingEvents(t, eventIds);
+		const secondBatch = await insertPendingPageviewEvents(t, {
+			siteId,
+			now: now + 1_000,
+			bucketStart,
+			totalEvents: 14,
+		});
+		await aggregatePendingEvents(t, secondBatch);
 
 		const rows = await getOverviewRowsForBucket(t, { siteId, bucketStart });
-		expect(new Set(rows.map((row) => row.shard)).size).toBeGreaterThan(1);
-		expect(rows.some((row) => row.shard !== 0)).toBe(true);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({
+			count: 24,
+			pageviewCount: 24,
+		});
 	});
 });

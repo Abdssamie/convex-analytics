@@ -62,7 +62,7 @@ function buildVisitorLoad(args: {
 
 describe("analytics high-load correctness", () => {
 	test(
-		"high ingest load stays exact after shard fanout and compaction",
+		"high ingest load stays exact with single-row rollups",
 		async () => {
 		vi.useFakeTimers();
 		try {
@@ -71,7 +71,6 @@ describe("analytics high-load correctness", () => {
 				slug: "stress-site",
 				name: "Stress Site",
 				writeKeyHash: "write_stress",
-				rollupShardCount: 16,
 				allowedPropertyKeys: ["plan", "billingCycle", "tier"],
 			});
 
@@ -108,7 +107,7 @@ describe("analytics high-load correctness", () => {
 
 			const hourOneRowsBefore = await t.run(async (ctx) => {
 				return await ctx.db
-					.query("rollupShards")
+					.query("rollups")
 					.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 						q
 							.eq("siteId", siteId)
@@ -119,23 +118,29 @@ describe("analytics high-load correctness", () => {
 					)
 					.take(32);
 			});
-			expect(hourOneRowsBefore.length).toBeGreaterThan(1);
+			expect(hourOneRowsBefore).toHaveLength(1);
+			expect(hourOneRowsBefore[0]).toMatchObject({
+				count: 120,
+				pageviewCount: 0,
+			});
 
 			const compactionNow = hourTwo + 4 * dayMs;
-			await t.action(internal.compaction.compactShards, {
+			const hourlyCompaction = await t.action(internal.compaction.compactShards, {
 				siteId,
 				interval: "hour",
 				now: compactionNow,
 			});
-			await t.action(internal.compaction.compactShards, {
+			const dailyCompaction = await t.action(internal.compaction.compactShards, {
 				siteId,
 				interval: "day",
 				now: compactionNow,
 			});
+			expect(hourlyCompaction).toEqual({ compactedPairs: 0, hasMore: false });
+			expect(dailyCompaction).toEqual({ compactedPairs: 0, hasMore: false });
 
 			const hourOneRowsAfter = await t.run(async (ctx) => {
 				return await ctx.db
-					.query("rollupShards")
+					.query("rollups")
 					.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 						q
 							.eq("siteId", siteId)
@@ -147,10 +152,7 @@ describe("analytics high-load correctness", () => {
 					.take(32);
 			});
 			expect(hourOneRowsAfter).toHaveLength(1);
-			expect(hourOneRowsAfter[0]).toMatchObject({
-				shard: 0,
-				count: 120,
-			});
+			expect(hourOneRowsAfter[0]).toMatchObject({ count: 120 });
 
 			const overview = await t.query(api.analytics.getOverview, {
 				siteId,

@@ -3,11 +3,14 @@ import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
-import { contextValidator, eventInputValidator } from "./types";
+import {
+	contextValidator,
+	eventInputValidator,
+	propertiesValidator,
+} from "./types";
 import type { IdOfSite } from "./types";
 import {
 	maxBatchSize,
-	defaultSettings,
 	aggregationBatchLimit,
 	hourMs,
 	dayMs,
@@ -16,7 +19,6 @@ import {
 	normalizeEventName,
 	sanitizeProperties,
 	floorToBucket,
-	shardForEvent,
 } from "./helpers";
 
 export const ingestBatch = mutation({
@@ -159,7 +161,7 @@ export async function aggregateEventsByIds(
 	let skipped = 0;
 	let failed = 0;
 	const now = Date.now();
-	const rollupDeltas = new Map<string, RollupShardDelta>();
+	const rollupDeltas = new Map<string, RollupDelta>();
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregatedAt !== null) {
@@ -171,7 +173,7 @@ export async function aggregateEventsByIds(
 			if (!site) {
 				throw new Error("Site not found");
 			}
-			const visitor = await upsertVisitor(ctx, {
+			await upsertVisitorRecord(ctx, {
 				siteId: event.siteId,
 				visitorId: event.visitorId,
 				seenAt: event.occurredAt,
@@ -179,7 +181,7 @@ export async function aggregateEventsByIds(
 				traits:
 					event.eventType === "identify" ? event.properties : undefined,
 			});
-			const session = await upsertSession(ctx, {
+			await upsertSessionRecord(ctx, {
 				siteId: event.siteId,
 				sessionId: event.sessionId,
 				visitorId: event.visitorId,
@@ -193,11 +195,11 @@ export async function aggregateEventsByIds(
 				utmSource: event.utmSource,
 				utmMedium: event.utmMedium,
 				utmCampaign: event.utmCampaign,
-				identifiedUserId: event.identifiedUserId ?? visitor.identifiedUserId,
+				identifiedUserId: event.identifiedUserId,
 				eventType: event.eventType,
 				sessionTimeoutMs: site.settings.sessionTimeoutMs,
 			});
-			accumulateRollupShards(rollupDeltas, {
+			accumulateRollups(rollupDeltas, {
 				siteId: event.siteId,
 				occurredAt: event.occurredAt,
 				eventName: event.eventName,
@@ -208,12 +210,6 @@ export async function aggregateEventsByIds(
 				utmMedium: event.utmMedium,
 				utmCampaign: event.utmCampaign,
 				receivedAt: now,
-				newSession: session.created,
-				newVisitor: visitor.created,
-				shard: shardForEvent(
-					event._id,
-					site.settings.rollupShardCount ?? defaultSettings.rollupShardCount,
-				),
 			});
 			await ctx.db.patch(event._id, {
 				aggregatedAt: now,
@@ -223,12 +219,28 @@ export async function aggregateEventsByIds(
 			failed += 1;
 		}
 	}
-	await flushRollupShards(ctx, rollupDeltas);
+	await flushRollups(ctx, rollupDeltas);
 
 	return { aggregated, skipped, failed };
 }
 
-export async function upsertVisitor(
+export const upsertVisitor = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+		visitorId: v.string(),
+		seenAt: v.number(),
+		identifiedUserId: v.optional(v.string()),
+		traits: propertiesValidator,
+	},
+	returns: v.object({
+		created: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		return await upsertVisitorRecord(ctx, args);
+	},
+});
+
+export async function upsertVisitorRecord(
 	ctx: MutationCtx,
 	args: {
 		siteId: IdOfSite;
@@ -237,7 +249,7 @@ export async function upsertVisitor(
 		identifiedUserId?: string;
 		traits?: Record<string, string | number | boolean | null>;
 	},
-	) {
+) {
 	const existing = await ctx.db
 		.query("visitors")
 		.withIndex("by_siteId_and_visitorId", (q) =>
@@ -253,13 +265,10 @@ export async function upsertVisitor(
 			identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
 			traits: args.traits ?? existing.traits,
 		});
-		return {
-			...(await ctx.db.get(existing._id))!,
-			created: false,
-		};
+		return { created: false };
 	}
 
-	const id = await ctx.db.insert("visitors", {
+	await ctx.db.insert("visitors", {
 		siteId: args.siteId,
 		visitorId: args.visitorId,
 		firstSeenAt: args.seenAt,
@@ -267,13 +276,41 @@ export async function upsertVisitor(
 		identifiedUserId: args.identifiedUserId,
 		traits: args.traits,
 	});
-	return {
-		...(await ctx.db.get(id))!,
-		created: true,
-	};
+	return { created: true };
 }
 
-export async function upsertSession(
+export const upsertSession = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+		sessionId: v.string(),
+		visitorId: v.string(),
+		occurredAt: v.number(),
+		path: v.optional(v.string()),
+		referrer: v.optional(v.string()),
+		device: v.optional(v.string()),
+		browser: v.optional(v.string()),
+		os: v.optional(v.string()),
+		country: v.optional(v.string()),
+		utmSource: v.optional(v.string()),
+		utmMedium: v.optional(v.string()),
+		utmCampaign: v.optional(v.string()),
+		identifiedUserId: v.optional(v.string()),
+		eventType: v.union(
+			v.literal("pageview"),
+			v.literal("track"),
+			v.literal("identify"),
+		),
+		sessionTimeoutMs: v.number(),
+	},
+	returns: v.object({
+		created: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		return await upsertSessionRecord(ctx, args);
+	},
+});
+
+export async function upsertSessionRecord(
 	ctx: MutationCtx,
 	args: {
 		siteId: IdOfSite;
@@ -306,7 +343,7 @@ export async function upsertSession(
 		!existing ||
 		args.occurredAt - existing.lastSeenAt > args.sessionTimeoutMs;
 	if (isNewSession) {
-		const id = await ctx.db.insert("sessions", {
+		await ctx.db.insert("sessions", {
 			siteId: args.siteId,
 			visitorId: args.visitorId,
 			sessionId: args.sessionId,
@@ -325,10 +362,7 @@ export async function upsertSession(
 			identifiedUserId: args.identifiedUserId,
 			pageviewCount: pageviewIncrement,
 		});
-		return {
-			...(await ctx.db.get(id))!,
-			created: true,
-		};
+		return { created: true };
 	}
 
 	const startedAt = Math.min(existing.startedAt, args.occurredAt);
@@ -357,13 +391,10 @@ export async function upsertSession(
 		identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
 		pageviewCount: nextPageviewCount,
 	});
-	return {
-		...(await ctx.db.get(existing._id))!,
-		created: false,
-	};
+	return { created: false };
 }
 
-type RollupShardInput = {
+type RollupInput = {
 	siteId: IdOfSite;
 	occurredAt: number;
 	eventName: string;
@@ -378,26 +409,22 @@ type RollupShardInput = {
 	utmMedium?: string;
 	utmCampaign?: string;
 	receivedAt: number;
-	newVisitor: boolean;
-	newSession: boolean;
-	shard: number;
 };
 
-type RollupShardDelta = {
+type RollupDelta = {
 	siteId: IdOfSite;
 	interval: "hour" | "day";
 	bucketStart: number;
 	dimension: string;
 	key: string;
-	shard: number;
 	count: number;
 	pageviewCount: number;
 	updatedAt: number;
 };
 
-export function accumulateRollupShards(
-	deltas: Map<string, RollupShardDelta>,
-	args: RollupShardInput,
+export function accumulateRollups(
+	deltas: Map<string, RollupDelta>,
+	args: RollupInput,
 ) {
 	const dimensions = [
 		{ dimension: "overview", key: "all" },
@@ -418,24 +445,22 @@ export function accumulateRollupShards(
 	].filter((item): item is { dimension: string; key: string } => item !== null);
 	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	for (const item of dimensions) {
-		mergeRollupShardDelta(deltas, {
+		mergeRollupDelta(deltas, {
 			siteId: args.siteId,
 			interval: "hour",
 			bucketStart: floorToBucket(args.occurredAt, hourMs),
 			dimension: item.dimension,
 			key: item.key,
-			shard: args.shard,
 			count: 1,
 			pageviewCount: pageviewIncrement,
 			updatedAt: args.receivedAt,
 		});
-		mergeRollupShardDelta(deltas, {
+		mergeRollupDelta(deltas, {
 			siteId: args.siteId,
 			interval: "day",
 			bucketStart: floorToBucket(args.occurredAt, dayMs),
 			dimension: item.dimension,
 			key: item.key,
-			shard: args.shard,
 			count: 1,
 			pageviewCount: pageviewIncrement,
 			updatedAt: args.receivedAt,
@@ -443,9 +468,9 @@ export function accumulateRollupShards(
 	}
 }
 
-export function mergeRollupShardDelta(
-	deltas: Map<string, RollupShardDelta>,
-	args: RollupShardDelta,
+export function mergeRollupDelta(
+	deltas: Map<string, RollupDelta>,
+	args: RollupDelta,
 ) {
 	const mapKey = [
 		args.siteId,
@@ -453,7 +478,6 @@ export function mergeRollupShardDelta(
 		args.bucketStart,
 		args.dimension,
 		args.key,
-		args.shard,
 	].join("|");
 	const existing = deltas.get(mapKey);
 	if (!existing) {
@@ -465,31 +489,29 @@ export function mergeRollupShardDelta(
 	existing.updatedAt = Math.max(existing.updatedAt, args.updatedAt);
 }
 
-export async function flushRollupShards(
+export async function flushRollups(
 	ctx: MutationCtx,
-	deltas: Map<string, RollupShardDelta>,
+	deltas: Map<string, RollupDelta>,
 ) {
 	for (const args of deltas.values()) {
-	const existing = await ctx.db
-		.query("rollupShards")
-		.withIndex("by_site_interval_dimension_key_bucket_shard", (q) =>
+		const existing = await ctx.db
+		.query("rollups")
+		.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 			q
 				.eq("siteId", args.siteId)
 				.eq("interval", args.interval)
 				.eq("dimension", args.dimension)
 				.eq("key", args.key)
-				.eq("bucketStart", args.bucketStart)
-				.eq("shard", args.shard),
+				.eq("bucketStart", args.bucketStart),
 		)
 		.unique();
 		if (!existing) {
-			await ctx.db.insert("rollupShards", {
+			await ctx.db.insert("rollups", {
 				siteId: args.siteId,
 				interval: args.interval,
 				bucketStart: args.bucketStart,
 				dimension: args.dimension,
 				key: args.key,
-				shard: args.shard,
 				count: args.count,
 				pageviewCount: args.pageviewCount,
 				bounceCount: 0,

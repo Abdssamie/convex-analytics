@@ -30,17 +30,17 @@ export const getOverview = query({
 	}),
 	handler: async (ctx, args) => {
 		const totals = await aggregateOverviewRange(ctx, args);
-	const [sessionStats, visitorCount] = await Promise.all([
-		querySessionStats(ctx, args),
-		queryVisitorCount(ctx, args),
-	]);
-	return {
-		events: totals.count,
-		pageviews: totals.pageviewCount,
-		sessions: sessionStats.sessionCount,
-		visitors: await queryVisitorCount(ctx, args),
-		bounceRate:
-			sessionStats.sessionCount === 0
+		const [sessionStats, visitorCount] = await Promise.all([
+			querySessionStats(ctx, args),
+			queryVisitorCount(ctx, args),
+		]);
+		return {
+			events: totals.count,
+			pageviews: totals.pageviewCount,
+			sessions: sessionStats.sessionCount,
+			visitors: visitorCount,
+			bounceRate:
+				sessionStats.sessionCount === 0
 					? 0
 					: sessionStats.bounceCount / sessionStats.sessionCount,
 			averageSessionDurationMs:
@@ -216,7 +216,7 @@ export async function queryHourlyRollups(
 	}
 	return await readAll(() =>
 		ctx.db
-			.query("rollupShards")
+			.query("rollups")
 			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)
@@ -240,7 +240,7 @@ export async function queryDailyRollups(
 	}
 	return await readAll(() =>
 		ctx.db
-			.query("rollupShards")
+			.query("rollups")
 			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)
@@ -733,7 +733,7 @@ async function queryDimensionRollups(
 	}
 	return await readAll(() =>
 		ctx.db
-			.query("rollupShards")
+			.query("rollups")
 			.withIndex("by_site_interval_dimension_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)

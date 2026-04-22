@@ -1,18 +1,14 @@
 import { describe, expect, test } from "vitest";
 import type { Id } from "./_generated/dataModel.js";
-import {
-	accumulateRollupShards,
-	flushRollupShards,
-} from "./ingest.js";
+import { accumulateRollups, flushRollups } from "./ingest.js";
 
 type RollupRow = {
-	_id: Id<"rollupShards">;
+	_id: Id<"rollups">;
 	siteId: Id<"sites">;
 	interval: "hour" | "day";
 	bucketStart: number;
 	dimension: string;
 	key: string;
-	shard: number;
 	count: number;
 	pageviewCount: number;
 	bounceCount: number;
@@ -26,7 +22,6 @@ function rollupStoreKey(args: {
 	bucketStart: number;
 	dimension: string;
 	key: string;
-	shard: number;
 }) {
 	return [
 		args.siteId,
@@ -34,7 +29,6 @@ function rollupStoreKey(args: {
 		args.bucketStart,
 		args.dimension,
 		args.key,
-		args.shard,
 	].join("|");
 }
 
@@ -50,14 +44,12 @@ function createRollupCtx() {
 	const ctx = {
 		db: {
 			query(table: string) {
-				expect(table).toBe("rollupShards");
+				expect(table).toBe("rollups");
 				return {
 					withIndex(indexName: string, builder: (q: {
 						eq: (field: string, value: string | number) => unknown;
 					}) => unknown) {
-						expect(indexName).toBe(
-							"by_site_interval_dimension_key_bucket_shard",
-						);
+						expect(indexName).toBe("by_site_interval_dimension_key_bucket");
 						const filters: Record<string, string | number> = {};
 						const q = {
 							eq(field: string, value: string | number) {
@@ -77,7 +69,6 @@ function createRollupCtx() {
 											bucketStart: filters.bucketStart as number,
 											dimension: filters.dimension as string,
 											key: filters.key as string,
-											shard: filters.shard as number,
 										}),
 									) ?? null
 								);
@@ -87,16 +78,16 @@ function createRollupCtx() {
 				};
 			},
 			async insert(table: string, value: Omit<RollupRow, "_id">) {
-				expect(table).toBe("rollupShards");
+				expect(table).toBe("rollups");
 				stats.insertCalls += 1;
 				const row = {
 					...value,
-					_id: `rollup-${nextId += 1}` as Id<"rollupShards">,
+					_id: `rollup-${nextId += 1}` as Id<"rollups">,
 				};
 				rows.set(rollupStoreKey(row), row);
 				return row._id;
 			},
-			async patch(id: Id<"rollupShards">, value: Partial<RollupRow>) {
+			async patch(id: Id<"rollups">, value: Partial<RollupRow>) {
 				stats.patchCalls += 1;
 				const row = [...rows.values()].find((candidate) => candidate._id === id);
 				if (!row) {
@@ -111,16 +102,15 @@ function createRollupCtx() {
 }
 
 describe("rollup write-path benchmark", () => {
-	test("high fanout batch collapses rollup DB writes to unique shard keys", async () => {
+	test("high fanout batch collapses rollup DB writes to unique bucket keys", async () => {
 		const siteId = "site_perf" as Id<"sites">;
 		const occurredAt = Date.UTC(2026, 0, 20, 12, 0, 0);
 		const updatedAt = Date.UTC(2026, 0, 20, 12, 5, 0);
-		const shard = 2;
 		const eventCount = 1_000;
 		const deltas = new Map();
 
 		for (let index = 0; index < eventCount; index += 1) {
-			accumulateRollupShards(deltas, {
+			accumulateRollups(deltas, {
 				siteId,
 				occurredAt,
 				eventName: "pageview",
@@ -130,9 +120,6 @@ describe("rollup write-path benchmark", () => {
 				utmSource: "newsletter",
 				utmCampaign: "spring-launch",
 				receivedAt: updatedAt,
-				newVisitor: true,
-				newSession: true,
-				shard,
 			});
 		}
 
@@ -140,7 +127,7 @@ describe("rollup write-path benchmark", () => {
 		expect(uniqueKeys).toBe(12);
 
 		const firstPass = createRollupCtx();
-		await flushRollupShards(firstPass.ctx as never, deltas);
+		await flushRollups(firstPass.ctx as never, deltas);
 
 		expect(firstPass.stats.uniqueCalls).toBe(uniqueKeys);
 		expect(firstPass.stats.insertCalls).toBe(uniqueKeys);
@@ -153,7 +140,6 @@ describe("rollup write-path benchmark", () => {
 				bucketStart: occurredAt,
 				dimension: "overview",
 				key: "all",
-				shard,
 			}),
 		);
 		expect(hourlyOverview).toMatchObject({
@@ -165,7 +151,7 @@ describe("rollup write-path benchmark", () => {
 		for (const row of firstPass.rows.values()) {
 			secondPass.rows.set(rollupStoreKey(row), { ...row });
 		}
-		await flushRollupShards(secondPass.ctx as never, deltas);
+		await flushRollups(secondPass.ctx as never, deltas);
 
 		expect(secondPass.stats.uniqueCalls).toBe(uniqueKeys);
 		expect(secondPass.stats.insertCalls).toBe(0);

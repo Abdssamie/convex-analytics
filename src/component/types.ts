@@ -49,7 +49,6 @@ export const siteValidator = v.object({
 		rawEventRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
-		rollupShardCount: v.optional(v.number()),
 		allowedPropertyKeys: v.optional(v.array(v.string())),
 		deniedPropertyKeys: v.optional(v.array(v.string())),
 	}),
@@ -138,7 +137,6 @@ export type SiteSettingsArgs = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
 };
@@ -149,7 +147,6 @@ export type SiteSettings = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
 };

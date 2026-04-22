@@ -15,9 +15,6 @@ export function siteSettingsFromArgs(
 		args.retentionDays ??
 		existing?.retentionDays ??
 		defaultSettings.retentionDays;
-	const rollupShardCount = normalizeRollupShardCount(
-		args.rollupShardCount ?? existing?.rollupShardCount,
-	);
 	return {
 		sessionTimeoutMs:
 			args.sessionTimeoutMs ??
@@ -34,7 +31,6 @@ export function siteSettingsFromArgs(
 			retentionDays,
 		dailyRollupRetentionDays:
 			args.dailyRollupRetentionDays ?? existing?.dailyRollupRetentionDays,
-		rollupShardCount,
 		allowedPropertyKeys:
 			args.allowedPropertyKeys ?? existing?.allowedPropertyKeys,
 		deniedPropertyKeys: args.deniedPropertyKeys ?? existing?.deniedPropertyKeys,
@@ -48,7 +44,6 @@ export function sameSiteSettings(left: SiteSettings, right: SiteSettings) {
 		left.rawEventRetentionDays === right.rawEventRetentionDays &&
 		left.hourlyRollupRetentionDays === right.hourlyRollupRetentionDays &&
 		left.dailyRollupRetentionDays === right.dailyRollupRetentionDays &&
-		left.rollupShardCount === right.rollupShardCount &&
 		sameOptionalStringArray(
 			left.allowedPropertyKeys,
 			right.allowedPropertyKeys,
@@ -156,29 +151,10 @@ export function floorToBucket(value: number, bucketMs: number) {
 	return Math.floor(value / bucketMs) * bucketMs;
 }
 
-export function normalizeRollupShardCount(value?: number) {
-	if (value === undefined) {
-		return defaultSettings.rollupShardCount;
-	}
-	if (!Number.isInteger(value) || value < 1 || value > 64) {
-		throw new Error("rollupShardCount must be an integer between 1 and 64");
-	}
-	return value;
-}
-
-export function shardForEvent(eventId: Id<"events">, rollupShardCount: number) {
-	let hash = 0;
-	for (let index = 0; index < eventId.length; index += 1) {
-		hash = (hash * 31 + eventId.charCodeAt(index)) >>> 0;
-	}
-
-	return hash % rollupShardCount;
-}
-
 export async function deleteRows(
 	ctx: MutationCtx,
 	rows: Array<{
-		_id: Id<"events"> | Id<"rollupShards">;
+		_id: Id<"events"> | Id<"rollups">;
 	}>,
 ) {
 	for (const row of rows) {

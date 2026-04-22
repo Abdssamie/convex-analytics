@@ -55,7 +55,6 @@ describe("example app integration under high event volume", () => {
 				name: "Default site",
 				writeKey: "write_test",
 				allowedOrigins: ["https://app.example.com"],
-				rollupShardCount: 8,
 				allowedPropertyKeys: ["plan"],
 			});
 

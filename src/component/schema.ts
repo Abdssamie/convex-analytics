@@ -16,7 +16,6 @@ export default defineSchema({
 			rawEventRetentionDays: v.optional(v.number()),
 			hourlyRollupRetentionDays: v.optional(v.number()),
 			dailyRollupRetentionDays: v.optional(v.number()),
-			rollupShardCount: v.optional(v.number()),
 			allowedPropertyKeys: v.optional(v.array(v.string())),
 			deniedPropertyKeys: v.optional(v.array(v.string())),
 		}),
@@ -109,27 +108,18 @@ export default defineSchema({
 			"occurredAt",
 		]),
 
-	rollupShards: defineTable({
+	rollups: defineTable({
 		siteId: v.id("sites"),
 		interval: v.union(v.literal("hour"), v.literal("day")),
 		bucketStart: v.number(),
 		dimension: v.string(),
 		key: v.string(),
-		shard: v.number(),
 		count: v.number(),
 		pageviewCount: v.number(),
 		bounceCount: v.number(),
 		durationMs: v.number(),
 		updatedAt: v.number(),
 	})
-		.index("by_site_interval_dimension_key_bucket_shard", [
-			"siteId",
-			"interval",
-			"dimension",
-			"key",
-			"bucketStart",
-			"shard",
-		])
 		.index("by_site_interval_dimension_key_bucket", [
 			"siteId",
 			"interval",

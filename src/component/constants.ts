@@ -3,7 +3,6 @@ export const defaultSettings = {
 	retentionDays: 90,
 	rawEventRetentionDays: 90,
 	hourlyRollupRetentionDays: 90,
-	rollupShardCount: 1,
 };
 export const hourMs = 60 * 60 * 1000;
 export const dayMs = 24 * hourMs;

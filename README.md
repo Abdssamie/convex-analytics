@@ -26,19 +26,17 @@ The component owns its own Convex tables:
 - `visitors`: durable anonymous visitor records
 - `sessions`: session windows and coarse device/browser/country summary
 - `events`: append-only raw events with lightweight aggregation marker
-- `rollupShards`: sharded hourly/daily report counters
+- `rollups`: hourly/daily report counters
 
 ```mermaid
 flowchart LR
     Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
     Http --> Ingest["ingestBatch\nappend-only raw event insert"]
     Ingest --> Events[("events")]
-    Ingest --> Worker["aggregateEventBatch"]
+    Ingest --> Worker["reducePendingSiteEvents"]
     Worker --> Visitors[("visitors")]
     Worker --> Sessions[("sessions")]
-    Worker --> Rollups[("rollupShards\nhourly + daily shards")]
-    Worker --> Compaction["compactShards\nbackground shard collapse"]
-    Compaction --> Rollups
+    Worker --> Rollups[("rollups\nhourly + daily")]
     Rollups --> Dashboard["Dashboard queries\ngetOverview/getTimeseries/top lists"]
     Events --> Dashboard
     Sessions --> Dashboard
@@ -54,9 +52,8 @@ key before calling component.
 
 Ingest and reporting are split on purpose. `ingestBatch` writes raw events
 quickly, leaves `aggregatedAt: null`, and schedules background aggregation. The
-worker materializes visitors, sessions, and rollup shards, then stamps
-`aggregatedAt`. Compaction later collapses old shard fanout back to shard `0`
-so dashboard queries stay cheap.
+worker materializes visitors, sessions, and rollups, then stamps
+`aggregatedAt`.
 
 Dashboard queries are range-aware:
 
@@ -275,8 +272,8 @@ Raw events are append-only source of truth. Rollups are serving layer.
 Retention is configured per site. Defaults are cost-conscious:
 
 - raw `events`: 90 days
-- hourly `rollupShards`: 90 days
-- daily `rollupShards`: kept indefinitely
+- hourly `rollups`: 90 days
+- daily `rollups`: kept indefinitely
 
 `retentionDays` is shared default for raw events and hourly rollups. Override
 specific fields when needed:
@@ -372,8 +369,7 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Raw events are slim.
 - Write keys are hashed before reaching component storage.
 - Ingest does not patch report counters inline.
-- Reports use sharded hourly/daily rollups for common analytics queries.
-- Old rollup shard fanout is compacted in background.
+- Reports use hourly/daily rollups for common analytics queries.
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.

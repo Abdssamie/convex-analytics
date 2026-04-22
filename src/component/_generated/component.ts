@@ -234,6 +234,17 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
+    local: {
+      wipe: {
+        wipePage: FunctionReference<
+          "mutation",
+          "internal",
+          { limit?: number },
+          { deleted: number; hasMore: boolean; lastTable: string | null },
+          Name
+        >;
+      };
+    };
     maintenance: {
       cleanupSite: FunctionReference<
         "action",
@@ -246,10 +257,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           slug?: string;
         },
         {
-          dailyRollupShards: number;
+          dailyRollups: number;
           events: number;
           hasMore: boolean;
-          hourlyRollupShards: number;
+          hourlyRollups: number;
         },
         Name
       >;
@@ -267,7 +278,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name: string;
           rawEventRetentionDays?: number;
           retentionDays?: number;
-          rollupShardCount?: number;
           sessionTimeoutMs?: number;
           slug: string;
           writeKeyHash: string;
@@ -292,7 +302,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             hourlyRollupRetentionDays?: number;
             rawEventRetentionDays?: number;
             retentionDays: number;
-            rollupShardCount?: number;
             sessionTimeoutMs: number;
           };
           slug: string;
@@ -321,7 +330,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           name?: string;
           rawEventRetentionDays?: number;
           retentionDays?: number;
-          rollupShardCount?: number;
           sessionTimeoutMs?: number;
           siteId: string;
           status?: "active" | "disabled";

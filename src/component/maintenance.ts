@@ -19,8 +19,8 @@ export const cleanupSite = action({
 	},
 	returns: v.object({
 		events: v.number(),
-		hourlyRollupShards: v.number(),
-		dailyRollupShards: v.number(),
+		hourlyRollups: v.number(),
+		dailyRollups: v.number(),
 		hasMore: v.boolean(),
 	}),
 	handler: async (
@@ -28,8 +28,8 @@ export const cleanupSite = action({
 		args,
 	): Promise<{
 		events: number;
-		hourlyRollupShards: number;
-		dailyRollupShards: number;
+		hourlyRollups: number;
+		dailyRollups: number;
 		hasMore: boolean;
 	}> => {
 		const site: {
@@ -71,7 +71,7 @@ export const cleanupSite = action({
 			limit,
 		});
 		const hourlyBudget = Math.max(0, limit - events.deleted);
-		const hourlyRollupShards = await deleteRollupShardsBudget(ctx, {
+		const hourlyRollups = await deleteRollupsBudget(ctx, {
 			siteId: site._id,
 			interval: "hour",
 			cutoff: hourlyRollupCutoff,
@@ -79,12 +79,12 @@ export const cleanupSite = action({
 		});
 		const dailyBudget = Math.max(
 			0,
-			limit - events.deleted - hourlyRollupShards.deleted,
+			limit - events.deleted - hourlyRollups.deleted,
 		);
-		const dailyRollupShards: { deleted: number; hasMore: boolean } =
+		const dailyRollups: { deleted: number; hasMore: boolean } =
 			dailyRollupCutoff === null
 				? { deleted: 0, hasMore: false }
-				: await deleteRollupShardsBudget(ctx, {
+				: await deleteRollupsBudget(ctx, {
 						siteId: site._id,
 						interval: "day",
 						cutoff: dailyRollupCutoff,
@@ -92,7 +92,7 @@ export const cleanupSite = action({
 					});
 
 		const hasMore =
-			events.hasMore || hourlyRollupShards.hasMore || dailyRollupShards.hasMore;
+			events.hasMore || hourlyRollups.hasMore || dailyRollups.hasMore;
 		if (hasMore && runUntilComplete) {
 			await ctx.scheduler.runAfter(0, api.maintenance.cleanupSite, {
 				siteId: site._id,
@@ -104,8 +104,8 @@ export const cleanupSite = action({
 
 		return {
 			events: events.deleted,
-			hourlyRollupShards: hourlyRollupShards.deleted,
-			dailyRollupShards: dailyRollupShards.deleted,
+			hourlyRollups: hourlyRollups.deleted,
+			dailyRollups: dailyRollups.deleted,
 			hasMore,
 		};
 	},
@@ -175,7 +175,7 @@ export const deleteEventsPage = internalMutation({
 	},
 });
 
-export const deleteRollupShardsPage = internalMutation({
+export const deleteRollupsPage = internalMutation({
 	args: {
 		siteId: v.id("sites"),
 		interval: v.union(v.literal("hour"), v.literal("day")),
@@ -190,7 +190,7 @@ export const deleteRollupShardsPage = internalMutation({
 	}),
 	handler: async (ctx, args) => {
 		const page = await ctx.db
-			.query("rollupShards")
+			.query("rollups")
 			.withIndex("by_site_interval_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)
@@ -249,7 +249,7 @@ async function deleteEventsBudget(
 	}
 }
 
-async function deleteRollupShardsBudget(
+async function deleteRollupsBudget(
 	ctx: ActionCtx,
 	args: {
 		siteId: IdOfSite;
@@ -273,7 +273,7 @@ async function deleteRollupShardsBudget(
 			continueCursor: string | null;
 			isDone: boolean;
 		} = await ctx.runMutation(
-			internal.maintenance.deleteRollupShardsPage,
+			internal.maintenance.deleteRollupsPage,
 			{
 				siteId: args.siteId,
 				interval: args.interval,
@@ -304,7 +304,7 @@ export async function deleteEventsBefore(
 	return rows.length;
 }
 
-export async function deleteRollupShardsBefore(
+export async function deleteRollupsBefore(
 	ctx: MutationCtx,
 	args: {
 		siteId: IdOfSite;
@@ -314,7 +314,7 @@ export async function deleteRollupShardsBefore(
 	},
 ) {
 	const rows = await ctx.db
-		.query("rollupShards")
+		.query("rollups")
 		.withIndex("by_site_interval_bucket", (q) =>
 			q
 				.eq("siteId", args.siteId)
