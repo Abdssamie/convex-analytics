@@ -203,18 +203,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     ingest: {
-      aggregatePending: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; now?: number; siteId: string },
-        {
-          aggregated: number;
-          failed: number;
-          remaining: number;
-          skipped: number;
-        },
-        Name
-      >;
       ingestBatch: FunctionReference<
         "mutation",
         "internal",

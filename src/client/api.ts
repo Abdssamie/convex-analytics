@@ -48,7 +48,6 @@ export function exposeAdminApi(
 		ensureSite,
 		updateSite,
 		rotateWriteKey,
-		aggregatePending,
 		getSiteBySlug,
 		cleanupSite,
 		pruneExpired,
@@ -58,7 +57,6 @@ export function exposeAdminApi(
 		ensureSite,
 		updateSite,
 		rotateWriteKey,
-		aggregatePending,
 		getSiteBySlug,
 		cleanupSite,
 		pruneExpired,
@@ -210,20 +208,6 @@ export function exposeApi(
 					siteId: args.siteId,
 					writeKeyHash: await hashWriteKey(args.writeKey),
 				});
-			},
-		}),
-		aggregatePending: mutationGeneric({
-			args: {
-				siteId: v.string(),
-				now: v.optional(v.number()),
-				limit: v.optional(v.number()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, {
-					type: "admin",
-					siteId: args.siteId,
-				});
-				return await ctx.runMutation(component.ingest.aggregatePending, args);
 			},
 		}),
 		getSiteBySlug: queryGeneric({

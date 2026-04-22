@@ -1,7 +1,7 @@
 import { mutation, internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { internal, api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { contextValidator, eventInputValidator } from "./types";
 import type { IdOfSite } from "./types";
@@ -147,63 +147,6 @@ export const aggregateEventBatch = internalMutation({
 	}),
 	handler: async (ctx, args) => {
 		return await aggregateEventsByIds(ctx, args.eventIds);
-	},
-});
-export const aggregatePending = mutation({
-	args: {
-		siteId: v.id("sites"),
-		now: v.optional(v.number()),
-		limit: v.optional(v.number()),
-	},
-	returns: v.object({
-		aggregated: v.number(),
-		skipped: v.number(),
-		failed: v.number(),
-		remaining: v.number(),
-	}),
-	handler: async (ctx, args) => {
-		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
-		const now = args.now ?? Date.now();
-		const rows = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_aggregatedAt_and_occurredAt", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("aggregatedAt", null)
-					.lte("occurredAt", now),
-			)
-			.take(limit + 1);
-		const eventIds = rows.slice(0, limit).map((row) => row._id);
-		const result =
-			eventIds.length === 0
-				? {
-						aggregated: 0,
-						skipped: 0,
-						failed: 0,
-					}
-				: await aggregateEventsByIds(ctx, eventIds);
-		if (rows.length > limit) {
-			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
-				siteId: args.siteId,
-				now,
-				limit,
-			});
-		} else {
-			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
-				siteId: args.siteId,
-				interval: "hour",
-			});
-			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
-				siteId: args.siteId,
-				interval: "day",
-			});
-		}
-		return {
-			aggregated: result.aggregated,
-			skipped: result.skipped,
-			failed: result.failed,
-			remaining: Math.max(0, rows.length - limit),
-		};
 	},
 });
 

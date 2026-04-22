@@ -35,7 +35,7 @@ flowchart LR
     Http --> Ingest["ingestBatch\nappend-only raw event insert"]
     Ingest --> Events[("events")]
     Ingest --> Dedupe[("ingestDedupes")]
-    Ingest --> Worker["aggregateEventBatch / aggregatePending"]
+    Ingest --> Worker["aggregateEventBatch"]
     Worker --> Visitors[("visitors")]
     Worker --> Sessions[("sessions")]
     Worker --> Rollups[("rollupShards\nhourly + daily shards")]
@@ -260,8 +260,6 @@ export const {
   ensureSite,
   updateSite,
   rotateWriteKey,
-  aggregatePending,
-  retryFailedEvents,
   cleanupSite,
   pruneExpired,
 } = exposeAdminApi(components.convexAnalytics, {
@@ -274,8 +272,6 @@ export const {
 Admin surface:
 
 - `createSite`, `ensureSite`, `updateSite`, `rotateWriteKey`
-- `aggregatePending(siteId, now?, limit?)`
-- `retryFailedEvents(siteId, limit?, runUntilComplete?)`
 - `cleanupSite(siteId? | slug?, now?, limit?, runUntilComplete?)`
 - `pruneExpired(now?, limit?)`
 
@@ -428,8 +424,6 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Ingest does not patch report counters inline.
 - Reports use sharded hourly/daily rollups for common analytics queries.
 - Old rollup shard fanout is compacted in background.
-- `aggregatePending` can repair missed pending events after deploys or failures.
-- `retryFailedEvents` can replay bounded failed batches after fixing root cause.
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.

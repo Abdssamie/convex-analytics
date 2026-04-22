@@ -20,7 +20,6 @@ export const {
   ensureSite,
   updateSite,
   rotateWriteKey,
-  aggregatePending,
   getSiteBySlug,
   cleanupSite,
   pruneExpired,
