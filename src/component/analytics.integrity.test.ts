@@ -212,10 +212,7 @@ describe("analytics integrity regressions", () => {
 							sessionId: `session-${index}`,
 							startedAt: occurredAt,
 							lastSeenAt: occurredAt,
-							eventCount: 1,
 							pageviewCount: index % 3 === 0 ? 1 : 0,
-							durationMs: 0,
-							bounce: true,
 						});
 					}
 				}

@@ -331,29 +331,26 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			entryPath: "/",
 			exitPath: "/",
-			eventCount: 3,
 			pageviewCount: 1,
 			identifiedUserId: "user-1",
-			bounce: true,
-			durationMs: 120_000,
+			startedAt: base,
+			lastSeenAt: base + 120_000,
 		});
 		expect(sessions.get("session-b")).toMatchObject({
 			visitorId: "visitor-2",
 			entryPath: "/pricing",
 			exitPath: "/checkout",
-			eventCount: 3,
 			pageviewCount: 2,
-			bounce: false,
-			durationMs: 120_000,
+			startedAt: base + 5 * 60_000,
+			lastSeenAt: base + 7 * 60_000,
 		});
 		expect(sessions.get("session-c")).toMatchObject({
 			visitorId: "visitor-1",
 			entryPath: "/docs",
 			exitPath: "/docs",
-			eventCount: 2,
 			pageviewCount: 1,
-			bounce: true,
-			durationMs: 30_000,
+			startedAt: base + 2 * hourMs,
+			lastSeenAt: base + 2 * hourMs + 30_000,
 		});
 
 		const overview = await t.query(api.analytics.getOverview, {
@@ -799,14 +796,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			entryPath: "/pricing",
 			exitPath: "/pricing",
 			pageviewCount: 1,
-			eventCount: 1,
 		});
 		expect(sessions.page[1]).toMatchObject({
 			startedAt: now,
 			entryPath: "/",
 			exitPath: "/",
 			pageviewCount: 1,
-			eventCount: 1,
 		});
 	});
 

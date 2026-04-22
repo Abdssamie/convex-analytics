@@ -319,10 +319,7 @@ export async function upsertSession(
 			utmMedium: args.utmMedium,
 			utmCampaign: args.utmCampaign,
 			identifiedUserId: args.identifiedUserId,
-			eventCount: 1,
 			pageviewCount: pageviewIncrement,
-			durationMs: 0,
-			bounce: pageviewIncrement <= 1,
 		});
 		return {
 			...(await ctx.db.get(id))!,
@@ -350,10 +347,7 @@ export async function upsertSession(
 		utmMedium: existing.utmMedium ?? args.utmMedium,
 		utmCampaign: existing.utmCampaign ?? args.utmCampaign,
 		identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
-		eventCount: existing.eventCount + 1,
 		pageviewCount: nextPageviewCount,
-		durationMs: Math.max(0, lastSeenAt - startedAt),
-		bounce: nextPageviewCount <= 1,
 	});
 	return {
 		...(await ctx.db.get(existing._id))!,

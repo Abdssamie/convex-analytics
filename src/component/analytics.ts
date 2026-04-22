@@ -540,8 +540,8 @@ async function querySessionStats(
 	return rows.reduce(
 		(sum, row) => ({
 			sessionCount: sum.sessionCount + 1,
-			bounceCount: sum.bounceCount + (row.bounce ? 1 : 0),
-			durationMs: sum.durationMs + row.durationMs,
+			bounceCount: sum.bounceCount + (row.pageviewCount <= 1 ? 1 : 0),
+			durationMs: sum.durationMs + Math.max(0, row.lastSeenAt - row.startedAt),
 		}),
 		{ sessionCount: 0, bounceCount: 0, durationMs: 0 },
 	);

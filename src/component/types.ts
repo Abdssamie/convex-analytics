@@ -101,10 +101,7 @@ export const sessionValidator = v.object({
 	os: v.optional(v.string()),
 	country: v.optional(v.string()),
 	identifiedUserId: v.optional(v.string()),
-	eventCount: v.number(),
 	pageviewCount: v.number(),
-	durationMs: v.number(),
-	bounce: v.boolean(),
 });
 export const topRowValidator = v.object({
 	key: v.string(),

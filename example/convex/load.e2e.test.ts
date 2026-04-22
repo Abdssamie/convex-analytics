@@ -159,9 +159,7 @@ describe("example app integration under high event volume", () => {
 			});
 			expect(sessionsPage.page).toHaveLength(5);
 			expect(sessionsPage.page[0]).toMatchObject({
-				eventCount: 4,
 				pageviewCount: 2,
-				bounce: false,
 			});
 			expect(sessionsPage.isDone).toBe(false);
 

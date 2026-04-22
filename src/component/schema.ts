@@ -55,10 +55,7 @@ export default defineSchema({
 		os: v.optional(v.string()),
 		country: v.optional(v.string()),
 		identifiedUserId: v.optional(v.string()),
-		eventCount: v.number(),
 		pageviewCount: v.number(),
-		durationMs: v.number(),
-		bounce: v.boolean(),
 	})
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
 		.index("by_siteId_and_sessionId_and_startedAt", [
