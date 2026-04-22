@@ -38,7 +38,6 @@ export type AnalyticsProperties = Record<
 	string | number | boolean | null
 >;
 export type IngestContext = {
-	source?: string;
 	device?: string;
 	browser?: string;
 	os?: string;

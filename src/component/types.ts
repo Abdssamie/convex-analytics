@@ -26,7 +26,6 @@ export const eventInputValidator = v.object({
 });
 export const contextValidator = v.optional(
 	v.object({
-		source: v.optional(v.string()),
 		device: v.optional(v.string()),
 		browser: v.optional(v.string()),
 		os: v.optional(v.string()),
@@ -74,7 +73,10 @@ export const eventValidator = v.object({
 	path: v.optional(v.string()),
 	title: v.optional(v.string()),
 	referrer: v.optional(v.string()),
-	source: v.optional(v.string()),
+	device: v.optional(v.string()),
+	browser: v.optional(v.string()),
+	os: v.optional(v.string()),
+	country: v.optional(v.string()),
 	utmSource: v.optional(v.string()),
 	utmMedium: v.optional(v.string()),
 	utmCampaign: v.optional(v.string()),

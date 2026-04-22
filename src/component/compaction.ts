@@ -161,9 +161,6 @@ export const compactShardPairPage = internalMutation({
 			if (shardZero) {
 				await ctx.db.patch(shardZero._id, {
 					count: shardZero.count + totals.count,
-					uniqueVisitorCount:
-						shardZero.uniqueVisitorCount + totals.uniqueVisitorCount,
-					sessionCount: shardZero.sessionCount + totals.sessionCount,
 					pageviewCount: shardZero.pageviewCount + totals.pageviewCount,
 					bounceCount: shardZero.bounceCount + totals.bounceCount,
 					durationMs: shardZero.durationMs + totals.durationMs,
@@ -179,8 +176,6 @@ export const compactShardPairPage = internalMutation({
 					key: exemplar.key,
 					shard: 0,
 					count: totals.count,
-					uniqueVisitorCount: totals.uniqueVisitorCount,
-					sessionCount: totals.sessionCount,
 					pageviewCount: totals.pageviewCount,
 					bounceCount: totals.bounceCount,
 					durationMs: totals.durationMs,

@@ -27,8 +27,6 @@ describe("analytics integrity regressions", () => {
 						key: "all",
 						shard: index % shardsPerBucket,
 						count: 1,
-						uniqueVisitorCount: 0,
-						sessionCount: 0,
 						pageviewCount: 1,
 						bounceCount: 0,
 						durationMs: 0,
@@ -92,8 +90,6 @@ describe("analytics integrity regressions", () => {
 					key: "newsletter",
 					shard: 0,
 					count: 36_000,
-					uniqueVisitorCount: 0,
-					sessionCount: 0,
 					pageviewCount: 0,
 					bounceCount: 0,
 					durationMs: 0,
@@ -107,8 +103,6 @@ describe("analytics integrity regressions", () => {
 					key: "ads",
 					shard: 0,
 					count: 12_000,
-					uniqueVisitorCount: 0,
-					sessionCount: 0,
 					pageviewCount: 0,
 					bounceCount: 0,
 					durationMs: 0,
@@ -177,8 +171,6 @@ describe("analytics integrity regressions", () => {
 					key: "all",
 					shard: 0,
 					count: 36_000,
-					uniqueVisitorCount: 12_000,
-					sessionCount: 18_000,
 					pageviewCount: 24_000,
 					bounceCount: 0,
 					durationMs: 0,
@@ -215,6 +207,32 @@ describe("analytics integrity regressions", () => {
 							pageviewCount: index % 3 === 0 ? 1 : 0,
 						});
 					}
+				}
+
+				for (let index = 0; index < 9_000; index += 1) {
+					const firstSeenAt =
+						queryFrom +
+						Math.floor((index * (queryTo - queryFrom - 1)) / 9_000);
+					await ctx.db.insert("visitors", {
+						siteId,
+						visitorId: `rolled-visitor-${index}`,
+						firstSeenAt,
+						lastSeenAt: firstSeenAt,
+					});
+				}
+
+				for (let index = 0; index < 13_500; index += 1) {
+					const startedAt =
+						queryFrom +
+						Math.floor((index * (queryTo - queryFrom - 1)) / 13_500);
+					await ctx.db.insert("sessions", {
+						siteId,
+						visitorId: `rolled-visitor-${index % 9_000}`,
+						sessionId: `rolled-session-${index}`,
+						startedAt,
+						lastSeenAt: startedAt,
+						pageviewCount: 1,
+					});
 				}
 			});
 

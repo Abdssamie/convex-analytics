@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
 import { floorToBucket } from "./helpers.js";
 import { hourMs } from "./constants.js";
+import { aggregateEventsByIds } from "./ingest.js";
 
 async function insertPendingPageviewEvents(
 	t: ReturnType<typeof initConvexTest>,
@@ -58,6 +59,15 @@ async function getOverviewRowsForBucket(
 	});
 }
 
+async function aggregatePendingEvents(
+	t: ReturnType<typeof initConvexTest>,
+	eventIds: Array<Id<"events">>,
+) {
+	return await t.run(async (ctx) => {
+		return await aggregateEventsByIds(ctx as never, eventIds);
+	});
+}
+
 describe("rollup shard count", () => {
 	test("sites default to one rollup shard and only write shard zero", async () => {
 		const t = initConvexTest();
@@ -75,7 +85,7 @@ describe("rollup shard count", () => {
 			totalEvents: 12,
 		});
 
-		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+		await aggregatePendingEvents(t, eventIds);
 
 		const site = await t.run(async (ctx) => await ctx.db.get(siteId));
 		const rows = await getOverviewRowsForBucket(t, { siteId, bucketStart });
@@ -101,7 +111,7 @@ describe("rollup shard count", () => {
 			totalEvents: 24,
 		});
 
-		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+		await aggregatePendingEvents(t, eventIds);
 
 		const rows = await getOverviewRowsForBucket(t, { siteId, bucketStart });
 		expect(new Set(rows.map((row) => row.shard)).size).toBeGreaterThan(1);

@@ -4,6 +4,7 @@ import type { Id } from "./_generated/dataModel.js";
 import { initConvexTest } from "./setup.test.js";
 import { dayMs, hourMs } from "./constants.js";
 import { floorToBucket, shardForEvent } from "./helpers.js";
+import { aggregateEventsByIds } from "./ingest.js";
 
 async function createSite(overrides?: {
 	slug?: string;
@@ -133,7 +134,6 @@ async function insertPendingPageviewEvents(
 				eventName: "pageview",
 				path: index % 2 === 0 ? "/" : "/pricing",
 				title: index % 2 === 0 ? "Home" : "Pricing",
-				source: "web",
 				utmCampaign: "load-test",
 				aggregatedAt: null,
 			});
@@ -169,7 +169,6 @@ async function insertPendingPageviewEvent(
 			path: args.path ?? "/",
 			title: "Page",
 			referrer: args.referrer,
-			source: "web",
 			utmSource: args.utmSource,
 			utmCampaign: args.utmCampaign,
 			aggregatedAt: null,
@@ -214,6 +213,15 @@ async function insertCollidingPendingPageviewEvents(
 	throw new Error("Could not create colliding event ids");
 }
 
+async function aggregatePendingEvents(
+	t: ReturnType<typeof initConvexTest>,
+	eventIds: Array<Id<"events">>,
+) {
+	return await t.run(async (ctx) => {
+		return await aggregateEventsByIds(ctx as never, eventIds);
+	});
+}
+
 describe("realistic ingestion, sharding, and compaction flows", () => {
 	test("scheduled worker materializes visitors, sessions, and rollups after append-only ingest", async () => {
 		vi.useFakeTimers();
@@ -226,7 +234,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			sessionId: "session-a",
 			context: {
-				source: "web",
+				device: "Desktop",
+				browser: "Chrome",
+				os: "macOS",
+				country: "US",
 				utmSource: "newsletter",
 				utmCampaign: "launch",
 			},
@@ -255,7 +266,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-2",
 			sessionId: "session-b",
 			context: {
-				source: "web",
+				device: "Mobile",
+				browser: "Safari",
+				os: "iOS",
+				country: "FR",
 				utmSource: "ads",
 				utmCampaign: "launch",
 			},
@@ -285,7 +299,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			sessionId: "session-c",
 			context: {
-				source: "web",
+				device: "Desktop",
+				browser: "Chrome",
+				os: "macOS",
+				country: "US",
 				utmSource: "newsletter",
 				utmCampaign: "docs",
 			},
@@ -331,6 +348,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			entryPath: "/",
 			exitPath: "/",
+			device: "Desktop",
+			browser: "Chrome",
+			os: "macOS",
+			country: "US",
 			pageviewCount: 1,
 			identifiedUserId: "user-1",
 			startedAt: base,
@@ -340,6 +361,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-2",
 			entryPath: "/pricing",
 			exitPath: "/checkout",
+			device: "Mobile",
+			browser: "Safari",
+			os: "iOS",
+			country: "FR",
 			pageviewCount: 2,
 			startedAt: base + 5 * 60_000,
 			lastSeenAt: base + 7 * 60_000,
@@ -348,6 +373,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			entryPath: "/docs",
 			exitPath: "/docs",
+			device: "Desktop",
+			browser: "Chrome",
+			os: "macOS",
+			country: "US",
 			pageviewCount: 1,
 			startedAt: base + 2 * hourMs,
 			lastSeenAt: base + 2 * hourMs + 30_000,
@@ -414,6 +443,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		});
 		expect(rawEvents.page).toHaveLength(8);
 		expect(rawEvents.isDone).toBe(true);
+		expect(rawEvents.page.find((row) => row.sessionId === "session-c")).toMatchObject({
+			device: "Desktop",
+			browser: "Chrome",
+			os: "macOS",
+			country: "US",
+		});
 		expect(
 			rawEvents.page.every(
 				(row: { aggregatedAt?: number | null }) => row.aggregatedAt !== null,
@@ -495,9 +530,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			totalEvents,
 		});
 		for (let index = 0; index < eventIds.length; index += 25) {
-			await t.mutation(internal.ingest.aggregateEventBatch, {
-				eventIds: eventIds.slice(index, index + 25),
-			});
+			await aggregatePendingEvents(t, eventIds.slice(index, index + 25));
 		}
 
 		const hourlyOverviewBefore = await getRollupBucketRows(t, {
@@ -594,8 +627,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			shard: 0,
 			count: totalEvents,
 			pageviewCount: totalEvents,
-			sessionCount: totalEvents,
-			uniqueVisitorCount: totalEvents,
 		});
 
 		const timeseriesAfter = await t.query(api.analytics.getTimeseries, {
@@ -658,9 +689,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		});
 		for (const chunk of [oldEventIds, recentEventIds]) {
 			for (let index = 0; index < chunk.length; index += 25) {
-				await t.mutation(internal.ingest.aggregateEventBatch, {
-					eventIds: chunk.slice(index, index + 25),
-				});
+				await aggregatePendingEvents(t, chunk.slice(index, index + 25));
 			}
 		}
 
@@ -699,8 +728,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			shard: 0,
 			count: 48,
 			pageviewCount: 48,
-			sessionCount: 3,
-			uniqueVisitorCount: 3,
 		});
 		const recentRowsAfter = await getRollupBucketRows(t, {
 			siteId,
@@ -774,7 +801,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			return [first, second];
 		});
 
-		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+		await aggregatePendingEvents(t, eventIds);
 
 		const sessions = await t.query(api.analytics.listSessions, {
 			siteId,
@@ -805,7 +832,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		});
 	});
 
-	test("aggregateEventBatch merges same-shard rollup deltas within batch", async () => {
+	test("aggregation merges same-shard rollup deltas within batch", async () => {
 		const { t, siteId, rollupShardCount } = await createSite();
 		const now = Date.UTC(2026, 0, 11, 12, 0, 0);
 		const bucketStart = floorToBucket(now, hourMs);
@@ -817,7 +844,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			rollupShardCount,
 		});
 
-		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+		await aggregatePendingEvents(t, eventIds);
 
 		const hourlyOverview = await getRollupShardRow(t, {
 			siteId,
@@ -854,26 +881,18 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 
 		expect(hourlyOverview).toMatchObject({
 			count: 3,
-			uniqueVisitorCount: 3,
-			sessionCount: 3,
 			pageviewCount: 3,
 		});
 		expect(hourlyPage).toMatchObject({
 			count: 3,
-			uniqueVisitorCount: 3,
-			sessionCount: 3,
 			pageviewCount: 3,
 		});
 		expect(hourlySource).toMatchObject({
 			count: 3,
-			uniqueVisitorCount: 3,
-			sessionCount: 3,
 			pageviewCount: 3,
 		});
 		expect(dailyOverview).toMatchObject({
 			count: 3,
-			uniqueVisitorCount: 3,
-			sessionCount: 3,
 			pageviewCount: 3,
 		});
 
@@ -887,7 +906,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(hourlyOverviewRows.filter((row) => row.shard === shard)).toHaveLength(1);
 	});
 
-	test("aggregateEventBatch patches existing rollup shard once with merged batch totals", async () => {
+	test("aggregation patches existing rollup shard once with merged batch totals", async () => {
 		const { t, siteId, rollupShardCount } = await createSite();
 		const now = Date.UTC(2026, 0, 11, 14, 0, 0);
 		const bucketStart = floorToBucket(now, hourMs);
@@ -909,8 +928,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				key: "all",
 				shard,
 				count: 7,
-				uniqueVisitorCount: 4,
-				sessionCount: 5,
 				pageviewCount: 6,
 				bounceCount: 0,
 				durationMs: 0,
@@ -924,8 +941,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				key: "all",
 				shard,
 				count: 10,
-				uniqueVisitorCount: 6,
-				sessionCount: 7,
 				pageviewCount: 9,
 				bounceCount: 0,
 				durationMs: 0,
@@ -933,7 +948,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			});
 		});
 
-		await t.mutation(internal.ingest.aggregateEventBatch, { eventIds });
+		await aggregatePendingEvents(t, eventIds);
 
 		const hourlyOverview = await getRollupShardRow(t, {
 			siteId,
@@ -954,14 +969,10 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 
 		expect(hourlyOverview).toMatchObject({
 			count: 9,
-			uniqueVisitorCount: 6,
-			sessionCount: 7,
 			pageviewCount: 8,
 		});
 		expect(dailyOverview).toMatchObject({
 			count: 12,
-			uniqueVisitorCount: 8,
-			sessionCount: 9,
 			pageviewCount: 11,
 		});
 		expect(hourlyOverview!.updatedAt).toBeGreaterThan(now - 1_000);
@@ -983,8 +994,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 					key: "all",
 					shard,
 					count: 2,
-					uniqueVisitorCount: 2,
-					sessionCount: 2,
 					pageviewCount: 2,
 					bounceCount: 0,
 					durationMs: 0,
@@ -998,8 +1007,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 					key: "pageview",
 					shard,
 					count: 1,
-					uniqueVisitorCount: 0,
-					sessionCount: 0,
 					pageviewCount: 1,
 					bounceCount: 0,
 					durationMs: 0,
@@ -1069,8 +1076,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(overviewRowsAfter[0]).toMatchObject({
 			shard: 0,
 			count: 6,
-			uniqueVisitorCount: 6,
-			sessionCount: 6,
 			pageviewCount: 6,
 		});
 		expect(eventRowsAfter).toHaveLength(3);
@@ -1111,9 +1116,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			return id;
 		});
 
-		const result = await t.mutation(internal.ingest.aggregateEventBatch, {
-			eventIds: [eventId],
-		});
+		const result = await aggregatePendingEvents(t, [eventId]);
 		expect(result).toEqual({
 			aggregated: 0,
 			skipped: 0,
@@ -1139,7 +1142,6 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				visitorId: "visitor-1",
 				sessionId: "session-1",
 				context: {
-					source: "web",
 				},
 				events: [
 					{

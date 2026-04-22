@@ -43,7 +43,6 @@ export function normalizeContext(value: unknown): IngestContext | undefined {
 	const record = readRecord(value);
 	const context: IngestContext = {};
 	for (const key of [
-		"source",
 		"device",
 		"browser",
 		"os",

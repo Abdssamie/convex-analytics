@@ -14,8 +14,6 @@ type RollupRow = {
 	key: string;
 	shard: number;
 	count: number;
-	uniqueVisitorCount: number;
-	sessionCount: number;
 	pageviewCount: number;
 	bounceCount: number;
 	durationMs: number;
@@ -160,8 +158,6 @@ describe("rollup write-path benchmark", () => {
 		);
 		expect(hourlyOverview).toMatchObject({
 			count: eventCount,
-			uniqueVisitorCount: eventCount,
-			sessionCount: eventCount,
 			pageviewCount: eventCount,
 		});
 

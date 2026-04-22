@@ -24,7 +24,7 @@ The component owns its own Convex tables:
 
 - `sites`: one tracked site/app per write key
 - `visitors`: durable anonymous visitor records
-- `sessions`: session windows and coarse device/source summary
+- `sessions`: session windows and coarse device/browser/country summary
 - `events`: append-only raw events with lightweight aggregation marker
 - `rollupShards`: sharded hourly/daily report counters
 

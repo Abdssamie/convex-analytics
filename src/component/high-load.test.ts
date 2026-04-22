@@ -92,7 +92,6 @@ describe("analytics high-load correctness", () => {
 					visitorId: batch.visitorId,
 					sessionId: batch.sessionId,
 					context: {
-						source: "web",
 						utmSource: "newsletter",
 						utmMedium: "email",
 						utmCampaign: "spring-launch",

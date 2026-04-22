@@ -130,17 +130,20 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             _creationTime: number;
             _id: string;
             aggregatedAt?: number | null;
+            browser?: string;
+            country?: string;
+            device?: string;
             eventName: string;
             eventType: "pageview" | "track" | "identify";
             identifiedUserId?: string;
             occurredAt: number;
+            os?: string;
             path?: string;
             properties?: Record<string, string | number | boolean | null>;
             receivedAt: number;
             referrer?: string;
             sessionId: string;
             siteId: string;
-            source?: string;
             title?: string;
             utmCampaign?: string;
             utmMedium?: string;
@@ -174,13 +177,10 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           page: Array<{
             _creationTime: number;
             _id: string;
-            bounce: boolean;
             browser?: string;
             country?: string;
             device?: string;
-            durationMs: number;
             entryPath?: string;
-            eventCount: number;
             exitPath?: string;
             identifiedUserId?: string;
             lastSeenAt: number;
@@ -211,7 +211,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             country?: string;
             device?: string;
             os?: string;
-            source?: string;
             utmCampaign?: string;
             utmMedium?: string;
             utmSource?: string;

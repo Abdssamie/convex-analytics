@@ -28,7 +28,6 @@ describe("maintenance cleanup", () => {
 					sessionId: `old-session-${index}`,
 					eventType: "track",
 					eventName: "old_event",
-					source: "web",
 					aggregatedAt: oldOccurredAt + index,
 				});
 			}
@@ -40,7 +39,6 @@ describe("maintenance cleanup", () => {
 				sessionId: "recent-session",
 				eventType: "track",
 				eventName: "recent_event",
-				source: "web",
 				aggregatedAt: recentOccurredAt,
 			});
 			await ctx.db.insert("events", {
@@ -51,7 +49,6 @@ describe("maintenance cleanup", () => {
 				sessionId: "pending-session",
 				eventType: "track",
 				eventName: "pending_event",
-				source: "web",
 				aggregatedAt: null,
 			});
 		});
@@ -108,7 +105,6 @@ describe("maintenance cleanup", () => {
 					sessionId: `old-session-${index}`,
 					eventType: "track",
 					eventName: "old_event",
-					source: "web",
 					aggregatedAt: oldOccurredAt + index,
 				});
 			}
@@ -122,8 +118,6 @@ describe("maintenance cleanup", () => {
 					dimension: "event",
 					key: `hour-${index}`,
 					count: 1,
-					uniqueVisitorCount: 0,
-					sessionCount: 0,
 					pageviewCount: 0,
 					bounceCount: 0,
 					durationMs: 0,
@@ -140,8 +134,6 @@ describe("maintenance cleanup", () => {
 					dimension: "event",
 					key: `day-${index}`,
 					count: 1,
-					uniqueVisitorCount: 0,
-					sessionCount: 0,
 					pageviewCount: 0,
 					bounceCount: 0,
 					durationMs: 0,

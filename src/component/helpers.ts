@@ -215,8 +215,6 @@ export async function resolveSite(
 export function sumRollups(
 	rows: Array<{
 		count: number;
-		uniqueVisitorCount: number;
-		sessionCount: number;
 		pageviewCount: number;
 		bounceCount: number;
 		durationMs: number;
@@ -225,16 +223,12 @@ export function sumRollups(
 	return rows.reduce(
 		(sum, row) => ({
 			count: sum.count + row.count,
-			uniqueVisitorCount: sum.uniqueVisitorCount + row.uniqueVisitorCount,
-			sessionCount: sum.sessionCount + row.sessionCount,
 			pageviewCount: sum.pageviewCount + row.pageviewCount,
 			bounceCount: sum.bounceCount + row.bounceCount,
 			durationMs: sum.durationMs + row.durationMs,
 		}),
 		{
 			count: 0,
-			uniqueVisitorCount: 0,
-			sessionCount: 0,
 			pageviewCount: 0,
 			bounceCount: 0,
 			durationMs: 0,

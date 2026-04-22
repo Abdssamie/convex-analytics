@@ -87,7 +87,10 @@ export const ingestBatch = mutation({
 				path: event.path,
 				title: event.title,
 				referrer: event.referrer,
-				source: args.context?.source,
+				device: args.context?.device,
+				browser: args.context?.browser,
+				os: args.context?.os,
+				country: args.context?.country,
 				utmSource: args.context?.utmSource,
 				utmMedium: args.context?.utmMedium,
 				utmCampaign: args.context?.utmCampaign,
@@ -128,34 +131,23 @@ export const reducePendingSiteEvents = internalMutation({
 				q.eq("siteId", args.siteId).eq("aggregatedAt", null),
 			)
 			.take(aggregationBatchLimit + 1);
+		
 		const eventIds = pendingEvents
 			.slice(0, aggregationBatchLimit)
 			.map((event) => event._id);
 		const result = await aggregateEventsByIds(ctx, eventIds);
+
 		const hasMore = pendingEvents.length > aggregationBatchLimit;
 		if (hasMore) {
 			await ctx.scheduler.runAfter(0, internal.ingest.reducePendingSiteEvents, {
 				siteId: args.siteId,
 			});
 		}
+		
 		return {
 			...result,
 			hasMore,
 		};
-	},
-});
-
-export const aggregateEventBatch = internalMutation({
-	args: {
-		eventIds: v.array(v.id("events")),
-	},
-	returns: v.object({
-		aggregated: v.number(),
-		skipped: v.number(),
-		failed: v.number(),
-	}),
-	handler: async (ctx, args) => {
-		return await aggregateEventsByIds(ctx, args.eventIds);
 	},
 });
 
@@ -194,6 +186,10 @@ export async function aggregateEventsByIds(
 				occurredAt: event.occurredAt,
 				path: event.path,
 				referrer: event.referrer,
+				device: event.device,
+				browser: event.browser,
+				os: event.os,
+				country: event.country,
 				utmSource: event.utmSource,
 				utmMedium: event.utmMedium,
 				utmCampaign: event.utmCampaign,
@@ -286,6 +282,10 @@ export async function upsertSession(
 		occurredAt: number;
 		path?: string;
 		referrer?: string;
+		device?: string;
+		browser?: string;
+		os?: string;
+		country?: string;
 		utmSource?: string;
 		utmMedium?: string;
 		utmCampaign?: string;
@@ -315,6 +315,10 @@ export async function upsertSession(
 			entryPath: args.path,
 			exitPath: args.path,
 			referrer: args.referrer,
+			device: args.device,
+			browser: args.browser,
+			os: args.os,
+			country: args.country,
 			utmSource: args.utmSource,
 			utmMedium: args.utmMedium,
 			utmCampaign: args.utmCampaign,
@@ -343,6 +347,10 @@ export async function upsertSession(
 				? args.path
 				: existing.exitPath,
 		referrer: existing.referrer ?? args.referrer,
+		device: existing.device ?? args.device,
+		browser: existing.browser ?? args.browser,
+		os: existing.os ?? args.os,
+		country: existing.country ?? args.country,
 		utmSource: existing.utmSource ?? args.utmSource,
 		utmMedium: existing.utmMedium ?? args.utmMedium,
 		utmCampaign: existing.utmCampaign ?? args.utmCampaign,
@@ -362,6 +370,10 @@ type RollupShardInput = {
 	eventType: "pageview" | "track" | "identify";
 	path?: string;
 	referrer?: string;
+	device?: string;
+	browser?: string;
+	os?: string;
+	country?: string;
 	utmSource?: string;
 	utmMedium?: string;
 	utmCampaign?: string;
@@ -379,8 +391,6 @@ type RollupShardDelta = {
 	key: string;
 	shard: number;
 	count: number;
-	uniqueVisitorCount: number;
-	sessionCount: number;
 	pageviewCount: number;
 	updatedAt: number;
 };
@@ -396,6 +406,10 @@ export function accumulateRollupShards(
 			? { dimension: "page", key: args.path }
 			: null,
 		args.referrer ? { dimension: "referrer", key: args.referrer } : null,
+		args.device ? { dimension: "device", key: args.device } : null,
+		args.browser ? { dimension: "browser", key: args.browser } : null,
+		args.os ? { dimension: "os", key: args.os } : null,
+		args.country ? { dimension: "country", key: args.country } : null,
 		args.utmSource ? { dimension: "utmSource", key: args.utmSource } : null,
 		args.utmMedium ? { dimension: "utmMedium", key: args.utmMedium } : null,
 		args.utmCampaign
@@ -412,8 +426,6 @@ export function accumulateRollupShards(
 			key: item.key,
 			shard: args.shard,
 			count: 1,
-			uniqueVisitorCount: args.newVisitor ? 1 : 0,
-			sessionCount: args.newSession ? 1 : 0,
 			pageviewCount: pageviewIncrement,
 			updatedAt: args.receivedAt,
 		});
@@ -425,8 +437,6 @@ export function accumulateRollupShards(
 			key: item.key,
 			shard: args.shard,
 			count: 1,
-			uniqueVisitorCount: args.newVisitor ? 1 : 0,
-			sessionCount: args.newSession ? 1 : 0,
 			pageviewCount: pageviewIncrement,
 			updatedAt: args.receivedAt,
 		});
@@ -451,8 +461,6 @@ export function mergeRollupShardDelta(
 		return;
 	}
 	existing.count += args.count;
-	existing.uniqueVisitorCount += args.uniqueVisitorCount;
-	existing.sessionCount += args.sessionCount;
 	existing.pageviewCount += args.pageviewCount;
 	existing.updatedAt = Math.max(existing.updatedAt, args.updatedAt);
 }
@@ -483,8 +491,6 @@ export async function flushRollupShards(
 				key: args.key,
 				shard: args.shard,
 				count: args.count,
-				uniqueVisitorCount: args.uniqueVisitorCount,
-				sessionCount: args.sessionCount,
 				pageviewCount: args.pageviewCount,
 				bounceCount: 0,
 				durationMs: 0,
@@ -495,9 +501,6 @@ export async function flushRollupShards(
 
 		await ctx.db.patch(existing._id, {
 			count: existing.count + args.count,
-			uniqueVisitorCount:
-				existing.uniqueVisitorCount + args.uniqueVisitorCount,
-			sessionCount: existing.sessionCount + args.sessionCount,
 			pageviewCount: existing.pageviewCount + args.pageviewCount,
 			updatedAt: Math.max(existing.updatedAt, args.updatedAt),
 		});

@@ -55,12 +55,16 @@ export function registerRoutes(
 			}
 			const writeKeyHash = await hashWriteKey(writeKey);
 			const body = await request.json();
+			const country = await getCountry(request);
 			const result = await ingestFromHttp(ctx, component, {
 				writeKeyHash,
 				origin,
 				visitorId: String(readRecord(body).visitorId ?? ""),
 				sessionId: String(readRecord(body).sessionId ?? ""),
-				context: normalizeContext(readRecord(body).context),
+				context: withDetectedCountry(
+					normalizeContext(readRecord(body).context),
+					country,
+				),
 				events: normalizeEvents(readRecord(body).events),
 			});
 			return jsonResponse(result, 202, origin);
@@ -100,4 +104,86 @@ export async function ingestFromHttp(
 		context: args.context,
 		events: args.events,
 	});
+}
+
+export function withDetectedCountry(
+	context: IngestContext | undefined,
+	country: string | undefined,
+) {
+	if (!country) {
+		return context;
+	}
+	return {
+		...context,
+		country: context?.country ?? country,
+	};
+}
+
+export async function getCountry(request: Request) {
+	const cfCountry = request.headers.get("cf-ipcountry");
+	if (cfCountry && cfCountry !== "XX") {
+		return cfCountry;
+	}
+
+	const ip =
+		request.headers.get("cf-connecting-ip") ??
+		request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+	if (!ip || ip === "127.0.0.1" || ip === "::1" || !isValidIp(ip)) {
+		return undefined;
+	}
+
+	try {
+		const response = await fetch(`https://api.country.is/${ip}`, {
+			signal: AbortSignal.timeout(500),
+		});
+		if (!response.ok) {
+			return undefined;
+		}
+		const data = (await response.json()) as { country?: string };
+		return typeof data.country === "string" ? data.country : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+function isValidIp(ip: string) {
+	return isValidIPv4(ip) || isValidIPv6(ip);
+}
+
+function isValidIPv4(ip: string) {
+	const parts = ip.split(".");
+	if (parts.length !== 4) {
+		return false;
+	}
+	return parts.every((part) => {
+		if (!/^\d{1,3}$/.test(part)) {
+			return false;
+		}
+		const value = Number(part);
+		return value >= 0 && value <= 255;
+	});
+}
+
+function isValidIPv6(ip: string) {
+	if (!/^[\da-fA-F:]+$/.test(ip)) {
+		return false;
+	}
+	const parts = ip.split(":");
+	if (parts.length < 3 || parts.length > 8) {
+		return false;
+	}
+	let compressed = false;
+	for (const part of parts) {
+		if (part === "") {
+			if (compressed) {
+				continue;
+			}
+			compressed = true;
+			continue;
+		}
+		if (part.length > 4 || !/^[\da-fA-F]{1,4}$/.test(part)) {
+			return false;
+		}
+	}
+	return true;
 }

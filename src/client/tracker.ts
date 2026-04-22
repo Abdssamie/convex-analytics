@@ -1,5 +1,6 @@
 import type { AnalyticsEvent, AnalyticsProperties } from "./types";
 import { randomId } from "./helpers";
+import { parseUA } from "./ua";
 
 export function createAnalytics(options: {
 	endpoint: string;
@@ -58,7 +59,7 @@ export function createAnalytics(options: {
 				type: "pageview",
 				path: globalThis.location?.pathname ?? undefined,
 				title: globalThis.document?.title ?? undefined,
-				referrer: globalThis.document?.referrer || undefined,
+				referrer: externalReferrer(),
 				properties,
 			});
 		},
@@ -147,10 +148,30 @@ export function browserContext() {
 	}
 
 	const params = new URLSearchParams(window.location.search);
+	const ua = parseUA(window.navigator?.userAgent ?? "");
 	return {
-		source: "browser",
+		device: ua.device,
+		browser: ua.browser,
+		os: ua.os,
 		utmSource: params.get("utm_source") ?? undefined,
 		utmMedium: params.get("utm_medium") ?? undefined,
 		utmCampaign: params.get("utm_campaign") ?? undefined,
 	};
+}
+
+export function externalReferrer() {
+	const referrer = globalThis.document?.referrer;
+	if (!referrer) {
+		return undefined;
+	}
+	try {
+		const referrerUrl = new URL(referrer);
+		const currentOrigin = globalThis.location?.origin;
+		if (currentOrigin && referrerUrl.origin === currentOrigin) {
+			return undefined;
+		}
+		return referrerUrl.toString();
+	} catch {
+		return referrer;
+	}
 }

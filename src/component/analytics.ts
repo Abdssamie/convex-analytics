@@ -30,14 +30,17 @@ export const getOverview = query({
 	}),
 	handler: async (ctx, args) => {
 		const totals = await aggregateOverviewRange(ctx, args);
-		const sessionStats = await querySessionStats(ctx, args);
-		return {
-			events: totals.count,
-			pageviews: totals.pageviewCount,
-			sessions: totals.sessionCount,
-			visitors: totals.uniqueVisitorCount,
-			bounceRate:
-				sessionStats.sessionCount === 0
+	const [sessionStats, visitorCount] = await Promise.all([
+		querySessionStats(ctx, args),
+		queryVisitorCount(ctx, args),
+	]);
+	return {
+		events: totals.count,
+		pageviews: totals.pageviewCount,
+		sessions: sessionStats.sessionCount,
+		visitors: await queryVisitorCount(ctx, args),
+		bounceRate:
+			sessionStats.sessionCount === 0
 					? 0
 					: sessionStats.bounceCount / sessionStats.sessionCount,
 			averageSessionDurationMs:
@@ -371,6 +374,10 @@ async function queryTimeseries(
 		args.interval === "hour"
 			? await queryHourlyRollups(ctx, args, "overview", "all")
 			: await queryDailyRollups(ctx, args, "overview", "all");
+	const [sessionBuckets, visitorBuckets] = await Promise.all([
+		querySessionBucketCounts(ctx, args),
+		queryVisitorBucketCounts(ctx, args),
+	]);
 	const byBucket = new Map<
 		number,
 		{ events: number; pageviews: number; sessions: number; visitors: number }
@@ -384,9 +391,27 @@ async function queryTimeseries(
 		};
 		current.events += row.count;
 		current.pageviews += row.pageviewCount;
-		current.sessions += row.sessionCount;
-		current.visitors += row.uniqueVisitorCount;
 		byBucket.set(row.bucketStart, current);
+	}
+	for (const [bucketStart, count] of sessionBuckets) {
+		const current = byBucket.get(bucketStart) ?? {
+			events: 0,
+			pageviews: 0,
+			sessions: 0,
+			visitors: 0,
+		};
+		current.sessions = (current.sessions ?? 0) + count;
+		byBucket.set(bucketStart, current);
+	}
+	for (const [bucketStart, count] of visitorBuckets) {
+		const current = byBucket.get(bucketStart) ?? {
+			events: 0,
+			pageviews: 0,
+			sessions: 0,
+			visitors: 0,
+		};
+		current.visitors = (current.visitors ?? 0) + count;
+		byBucket.set(bucketStart, current);
 	}
 	const bucketStarts = collectBucketStarts(args.from, args.to, bucketMs);
 	if (bucketStarts.length === 0) {
@@ -449,8 +474,6 @@ async function aggregateOverviewRange(
 ) {
 	const totals = {
 		count: 0,
-		uniqueVisitorCount: 0,
-		sessionCount: 0,
 		pageviewCount: 0,
 		bounceCount: 0,
 		durationMs: 0,
@@ -503,8 +526,6 @@ async function aggregateOverviewRange(
 		}, "overview", "all");
 		const sums = sumRollups(rows);
 		totals.count += sums.count;
-		totals.uniqueVisitorCount += sums.uniqueVisitorCount;
-		totals.sessionCount += sums.sessionCount;
 		totals.pageviewCount += sums.pageviewCount;
 	}
 	if (plan.dailyRange) {
@@ -515,11 +536,17 @@ async function aggregateOverviewRange(
 		}, "overview", "all");
 		const sums = sumRollups(rows);
 		totals.count += sums.count;
-		totals.uniqueVisitorCount += sums.uniqueVisitorCount;
-		totals.sessionCount += sums.sessionCount;
 		totals.pageviewCount += sums.pageviewCount;
 	}
-	return totals;
+	const [sessionStats, visitorCount] = await Promise.all([
+		querySessionStats(ctx, args),
+		queryVisitorCount(ctx, args),
+	]);
+	return {
+		...totals,
+		uniqueVisitorCount: visitorCount,
+		sessionCount: sessionStats.sessionCount,
+	};
 }
 
 async function querySessionStats(
@@ -603,6 +630,48 @@ async function summarizeRawOverview(
 		bounceCount: sessionStats.bounceCount,
 		durationMs: sessionStats.durationMs,
 	};
+}
+
+async function querySessionBucketCounts(
+	ctx: QueryCtx,
+	args: { siteId: IdOfSite; from: number; to: number; interval: "hour" | "day" },
+) {
+	const bucketMs = args.interval === "hour" ? hourMs : dayMs;
+	const counts = new Map<number, number>();
+	if (args.from >= args.to) {
+		return counts;
+	}
+	for await (const row of ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
+		q
+			.eq("siteId", args.siteId)
+			.gte("startedAt", args.from)
+			.lt("startedAt", args.to),
+	)) {
+		const bucketStart = floorToBucket(row.startedAt, bucketMs);
+		counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
+	}
+	return counts;
+}
+
+async function queryVisitorBucketCounts(
+	ctx: QueryCtx,
+	args: { siteId: IdOfSite; from: number; to: number; interval: "hour" | "day" },
+) {
+	const bucketMs = args.interval === "hour" ? hourMs : dayMs;
+	const counts = new Map<number, number>();
+	if (args.from >= args.to) {
+		return counts;
+	}
+	for await (const row of ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
+		q
+			.eq("siteId", args.siteId)
+			.gte("firstSeenAt", args.from)
+			.lt("firstSeenAt", args.to),
+	)) {
+		const bucketStart = floorToBucket(row.firstSeenAt, bucketMs);
+		counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
+	}
+	return counts;
 }
 
 async function queryVisitorCount(
@@ -760,14 +829,14 @@ function collectBucketStarts(from: number, to: number, bucketMs: number) {
 function toTimeseriesRow(row: {
 	count: number;
 	pageviewCount: number;
-	sessionCount: number;
-	uniqueVisitorCount: number;
+	sessionCount?: number;
+	uniqueVisitorCount?: number;
 }) {
 	return {
 		events: row.count,
 		pageviews: row.pageviewCount,
-		sessions: row.sessionCount,
-		visitors: row.uniqueVisitorCount,
+		sessions: row.sessionCount ?? 0,
+		visitors: row.uniqueVisitorCount ?? 0,
 	};
 }
 
@@ -777,6 +846,10 @@ function keyForEventDimension(
 		eventType: "pageview" | "track" | "identify";
 		path?: string;
 		referrer?: string;
+		device?: string;
+		browser?: string;
+		os?: string;
+		country?: string;
 		utmSource?: string;
 		utmMedium?: string;
 		utmCampaign?: string;
@@ -790,6 +863,14 @@ function keyForEventDimension(
 			return event.eventType === "pageview" ? event.path : undefined;
 		case "referrer":
 			return event.referrer;
+		case "device":
+			return event.device;
+		case "browser":
+			return event.browser;
+		case "os":
+			return event.os;
+		case "country":
+			return event.country;
 		case "utmSource":
 			return event.utmSource;
 		case "utmMedium":
@@ -835,24 +916,18 @@ function subtractTopRows(
 function addOverviewTotals(
 	target: {
 		count: number;
-		uniqueVisitorCount: number;
-		sessionCount: number;
 		pageviewCount: number;
 		bounceCount: number;
 		durationMs: number;
 	},
 	source: {
 		count: number;
-		uniqueVisitorCount: number;
-		sessionCount: number;
 		pageviewCount: number;
 		bounceCount: number;
 		durationMs: number;
 	},
 ) {
 	target.count += source.count;
-	target.uniqueVisitorCount += source.uniqueVisitorCount;
-	target.sessionCount += source.sessionCount;
 	target.pageviewCount += source.pageviewCount;
 	target.bounceCount += source.bounceCount;
 	target.durationMs += source.durationMs;
@@ -861,24 +936,18 @@ function addOverviewTotals(
 function subtractOverviewTotals(
 	target: {
 		count: number;
-		uniqueVisitorCount: number;
-		sessionCount: number;
 		pageviewCount: number;
 		bounceCount: number;
 		durationMs: number;
 	},
 	source: {
 		count: number;
-		uniqueVisitorCount: number;
-		sessionCount: number;
 		pageviewCount: number;
 		bounceCount: number;
 		durationMs: number;
 	},
 ) {
 	target.count -= source.count;
-	target.uniqueVisitorCount -= source.uniqueVisitorCount;
-	target.sessionCount -= source.sessionCount;
 	target.pageviewCount -= source.pageviewCount;
 	target.bounceCount -= source.bounceCount;
 	target.durationMs -= source.durationMs;
