@@ -409,7 +409,7 @@ describe("realistic ingestion and rollup flows", () => {
 		});
 		expect(rawEvents.page).toHaveLength(8);
 		expect(rawEvents.isDone).toBe(true);
-		expect(rawEvents.page.find((row) => row.sessionId === "session-c")).toMatchObject({
+		expect(rawEvents.page.find((row: { sessionId: string }) => row.sessionId === "session-c")).toMatchObject({
 			device: "Desktop",
 			browser: "Chrome",
 			os: "macOS",
@@ -912,6 +912,8 @@ describe("realistic ingestion and rollup flows", () => {
 				key: "all",
 				count: 7,
 				pageviewCount: 6,
+				visitorCount: 0,
+				sessionCount: 0,
 				bounceCount: 0,
 				durationMs: 0,
 				updatedAt: now - 1_000,
@@ -924,6 +926,8 @@ describe("realistic ingestion and rollup flows", () => {
 				key: "all",
 				count: 10,
 				pageviewCount: 9,
+				visitorCount: 0,
+				sessionCount: 0,
 				bounceCount: 0,
 				durationMs: 0,
 				updatedAt: now - 1_000,
@@ -973,6 +977,8 @@ describe("realistic ingestion and rollup flows", () => {
 				key: "all",
 				count: 6,
 				pageviewCount: 6,
+				visitorCount: 0,
+				sessionCount: 0,
 				bounceCount: 0,
 				durationMs: 0,
 				updatedAt: now,
@@ -985,6 +991,8 @@ describe("realistic ingestion and rollup flows", () => {
 				key: "pageview",
 				count: 3,
 				pageviewCount: 3,
+				visitorCount: 0,
+				sessionCount: 0,
 				bounceCount: 0,
 				durationMs: 0,
 				updatedAt: now,

@@ -1,1048 +1,1250 @@
 import { query } from "./_generated/server.js";
 import type { QueryCtx } from "./_generated/server.js";
-import { v } from "convex/values";
+import { v, type Infer } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import {
-	topRowValidator,
-	propertyBreakdownRowValidator,
-	paginatedEventsValidator,
-	paginatedSessionsValidator,
+  topRowValidator,
+  propertyBreakdownRowValidator,
+  paginatedEventsValidator,
+  paginatedSessionsValidator,
+  paginatedVisitorsValidator,
+  eventValidator,
+  sessionValidator,
+  visitorValidator,
 } from "./types.js";
 import type { IdOfSite } from "./types.js";
 import { hourMs, dayMs } from "./constants.js";
-import { floorToBucket, sumRollups } from "./helpers.js";
+import { floorToBucket, sumRollups, manualPaginate } from "./helpers.js";
 
 const scanPageSize = 256;
 
 export const getOverview = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-	},
-	returns: v.object({
-		events: v.number(),
-		pageviews: v.number(),
-		sessions: v.number(),
-		visitors: v.number(),
-		bounceRate: v.number(),
-		averageSessionDurationMs: v.number(),
-	}),
-	handler: async (ctx, args) => {
-		const totals = await aggregateOverviewRange(ctx, args);
-		const [sessionStats, visitorCount] = await Promise.all([
-			querySessionStats(ctx, args),
-			queryVisitorCount(ctx, args),
-		]);
-		return {
-			events: totals.count,
-			pageviews: totals.pageviewCount,
-			sessions: sessionStats.sessionCount,
-			visitors: visitorCount,
-			bounceRate:
-				sessionStats.sessionCount === 0
-					? 0
-					: sessionStats.bounceCount / sessionStats.sessionCount,
-			averageSessionDurationMs:
-				sessionStats.sessionCount === 0
-					? 0
-					: sessionStats.durationMs / sessionStats.sessionCount,
-		};
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+  },
+  returns: v.object({
+    events: v.number(),
+    pageviews: v.number(),
+    sessions: v.number(),
+    visitors: v.number(),
+    bounceRate: v.number(),
+    averageSessionDurationMs: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const totals = await aggregateOverviewRange(ctx, args);
+    const [sessionStats, visitorCount] = await Promise.all([
+      querySessionStats(ctx, args),
+      queryVisitorCount(ctx, args),
+    ]);
+    return {
+      events: totals.count,
+      pageviews: totals.pageviewCount,
+      sessions: sessionStats.sessionCount,
+      visitors: visitorCount,
+      bounceRate:
+        sessionStats.sessionCount === 0
+          ? 0
+          : sessionStats.bounceCount / sessionStats.sessionCount,
+      averageSessionDurationMs:
+        sessionStats.sessionCount === 0
+          ? 0
+          : sessionStats.durationMs / sessionStats.sessionCount,
+    };
+  },
 });
 
 export const getTimeseries = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		interval: v.union(v.literal("hour"), v.literal("day")),
-	},
-	returns: v.array(
-		v.object({
-			bucketStart: v.number(),
-			events: v.number(),
-			pageviews: v.number(),
-			sessions: v.number(),
-			visitors: v.number(),
-		}),
-	),
-	handler: async (ctx, args) => {
-		return await queryTimeseries(ctx, args);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    interval: v.union(v.literal("hour"), v.literal("day")),
+  },
+  returns: v.array(
+    v.object({
+      bucketStart: v.number(),
+      events: v.number(),
+      pageviews: v.number(),
+      sessions: v.number(),
+      visitors: v.number(),
+    }),
+  ),
+  handler: async (ctx, args) => {
+    return await queryTimeseries(ctx, args);
+  },
 });
 
 export const getTopPages = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "page", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "page", args.limit ?? 10);
+  },
 });
 
 export const getTopReferrers = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "referrer", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "referrer", args.limit ?? 10);
+  },
 });
 
 export const getTopSources = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "utmSource", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "utmSource", args.limit ?? 10);
+  },
 });
 
 export const getTopMediums = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "utmMedium", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "utmMedium", args.limit ?? 10);
+  },
 });
 
 export const getTopCampaigns = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "utmCampaign", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "utmCampaign", args.limit ?? 10);
+  },
 });
 export const getTopEvents = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(topRowValidator),
-	handler: async (ctx, args) => {
-		return await topDimension(ctx, args, "event", args.limit ?? 10);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => {
+    return await topDimension(ctx, args, "event", args.limit ?? 10);
+  },
 });
+
+export const getTopDevices = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) =>
+    topDimension(ctx, args, "device", args.limit ?? 10),
+});
+
+export const getTopBrowsers = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) =>
+    topDimension(ctx, args, "browser", args.limit ?? 10),
+});
+
+export const getTopOs = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) => topDimension(ctx, args, "os", args.limit ?? 10),
+});
+
+export const getTopCountries = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(topRowValidator),
+  handler: async (ctx, args) =>
+    topDimension(ctx, args, "country", args.limit ?? 10),
+});
+
+// Single combined query for the main dashboard overview page.
+// Returns stats + timeseries + top pages + top sources in one round-trip,
+// saving 3 extra subscriptions and 3 extra network requests.
+export const getDashboardSummary = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.number(),
+    to: v.number(),
+    interval: v.union(v.literal("hour"), v.literal("day")),
+  },
+  returns: v.object({
+    overview: v.object({
+      events: v.number(),
+      pageviews: v.number(),
+      sessions: v.number(),
+      visitors: v.number(),
+      bounceRate: v.number(),
+      averageSessionDurationMs: v.number(),
+    }),
+    timeseries: v.array(
+      v.object({
+        bucketStart: v.number(),
+        events: v.number(),
+        pageviews: v.number(),
+        sessions: v.number(),
+        visitors: v.number(),
+      }),
+    ),
+    topPages: v.array(topRowValidator),
+    topSources: v.array(topRowValidator),
+  }),
+  handler: async (ctx, args) => {
+    const totals = await aggregateOverviewRange(ctx, args);
+    const [sessionStats, visitorCount, timeseries, topPages, topSources] =
+      await Promise.all([
+        querySessionStats(ctx, args),
+        queryVisitorCount(ctx, args),
+        queryTimeseries(ctx, args),
+        topDimension(ctx, args, "page", 5),
+        topDimension(ctx, args, "utmSource", 5),
+      ]);
+    return {
+      overview: {
+        events: totals.count,
+        pageviews: totals.pageviewCount,
+        sessions: sessionStats.sessionCount,
+        visitors: visitorCount,
+        bounceRate:
+          sessionStats.sessionCount === 0
+            ? 0
+            : sessionStats.bounceCount / sessionStats.sessionCount,
+        averageSessionDurationMs:
+          sessionStats.sessionCount === 0
+            ? 0
+            : sessionStats.durationMs / sessionStats.sessionCount,
+      },
+      timeseries,
+      topPages,
+      topSources,
+    };
+  },
+});
+
 export const getEventPropertyBreakdown = query({
-	args: {
-		siteId: v.id("sites"),
-		eventName: v.string(),
-		propertyKey: v.string(),
-		from: v.number(),
-		to: v.number(),
-		limit: v.optional(v.number()),
-	},
-	returns: v.array(propertyBreakdownRowValidator),
-	handler: async (ctx, args) => {
-		return await eventPropertyBreakdown(ctx, args);
-	},
+  args: {
+    siteId: v.id("sites"),
+    eventName: v.string(),
+    propertyKey: v.string(),
+    from: v.number(),
+    to: v.number(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(propertyBreakdownRowValidator),
+  handler: async (ctx, args) => {
+    return await eventPropertyBreakdown(ctx, args);
+  },
 });
 export const listRawEvents = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.optional(v.number()),
-		to: v.optional(v.number()),
-		paginationOpts: paginationOptsValidator,
-	},
-	returns: paginatedEventsValidator,
-	handler: async (ctx, args) => {
-		return await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_occurredAt", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.gte("occurredAt", args.from ?? 0)
-					.lt("occurredAt", args.to ?? Number.MAX_SAFE_INTEGER),
-			)
-			.order("desc")
-			.paginate(args.paginationOpts);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginatedEventsValidator,
+  handler: async (ctx, args) => {
+    return await manualPaginate<Infer<typeof eventValidator>>(
+      ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("occurredAt", args.from ?? 0)
+          .lt("occurredAt", args.to ?? Number.MAX_SAFE_INTEGER),
+      ).order("desc"),
+      args.paginationOpts,
+    );
+  },
 });
 export const listSessions = query({
-	args: {
-		siteId: v.id("sites"),
-		from: v.optional(v.number()),
-		to: v.optional(v.number()),
-		paginationOpts: paginationOptsValidator,
-	},
-	returns: paginatedSessionsValidator,
-	handler: async (ctx, args) => {
-		return await ctx.db
-			.query("sessions")
-			.withIndex("by_siteId_and_startedAt", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.gte("startedAt", args.from ?? 0)
-					.lt("startedAt", args.to ?? Number.MAX_SAFE_INTEGER),
-			)
-			.order("desc")
-			.paginate(args.paginationOpts);
-	},
+  args: {
+    siteId: v.id("sites"),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginatedSessionsValidator,
+  handler: async (ctx, args) => {
+    return await manualPaginate<Infer<typeof sessionValidator>>(
+      ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("startedAt", args.from ?? 0)
+          .lt("startedAt", args.to ?? Number.MAX_SAFE_INTEGER),
+      ).order("desc"),
+      args.paginationOpts,
+    );
+  },
+});
+
+// Uses the eventName index to efficiently page through only pageview events.
+export const listPageviews = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginatedEventsValidator,
+  handler: async (ctx, args) => {
+    return await manualPaginate<Infer<typeof eventValidator>>(
+      ctx.db.query("events").withIndex("by_siteId_and_eventName_and_occurredAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .eq("eventName", "pageview")
+          .gte("occurredAt", args.from ?? 0)
+          .lt("occurredAt", args.to ?? Number.MAX_SAFE_INTEGER),
+      ).order("desc"),
+      args.paginationOpts,
+    );
+  },
+});
+
+export const listVisitors = query({
+  args: {
+    siteId: v.id("sites"),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    paginationOpts: paginationOptsValidator,
+  },
+  returns: paginatedVisitorsValidator,
+  handler: async (ctx, args) => {
+    return await manualPaginate<Infer<typeof visitorValidator>>(
+      ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("firstSeenAt", args.from ?? 0)
+          .lt("firstSeenAt", args.to ?? Number.MAX_SAFE_INTEGER),
+      ).order("desc"),
+      args.paginationOpts,
+    );
+  },
 });
 
 export async function queryHourlyRollups(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
-	dimension: string,
-	key: string,
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
+  dimension: string,
+  key: string,
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	return await readAll(() =>
-		ctx.db
-			.query("rollups")
-			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("interval", "hour")
-					.eq("dimension", dimension)
-					.eq("key", key)
-					.gte("bucketStart", floorToBucket(args.from, hourMs))
-					.lt("bucketStart", args.to),
-			),
-	);
+  if (args.from >= args.to) {
+    return [];
+  }
+  return await readAll(() =>
+    ctx.db
+      .query("rollups")
+      .withIndex("by_site_interval_dimension_key_bucket", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .eq("interval", "hour")
+          .eq("dimension", dimension)
+          .eq("key", key)
+          .gte("bucketStart", floorToBucket(args.from, hourMs))
+          .lt("bucketStart", args.to),
+      ),
+  );
 }
 
 export async function queryDailyRollups(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
-	dimension: string,
-	key: string,
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
+  dimension: string,
+  key: string,
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	return await readAll(() =>
-		ctx.db
-			.query("rollups")
-			.withIndex("by_site_interval_dimension_key_bucket", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("interval", "day")
-					.eq("dimension", dimension)
-					.eq("key", key)
-					.gte("bucketStart", floorToBucket(args.from, dayMs))
-					.lt("bucketStart", args.to),
-			),
-	);
+  if (args.from >= args.to) {
+    return [];
+  }
+  return await readAll(() =>
+    ctx.db
+      .query("rollups")
+      .withIndex("by_site_interval_dimension_key_bucket", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .eq("interval", "day")
+          .eq("dimension", dimension)
+          .eq("key", key)
+          .gte("bucketStart", floorToBucket(args.from, dayMs))
+          .lt("bucketStart", args.to),
+      ),
+  );
 }
 
 export async function topDimension(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
-	dimension: string,
-	limit: number,
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
+  dimension: string,
+  limit: number,
 ) {
-	const byKey = new Map<string, { count: number; pageviewCount: number }>();
-	const edgePlan = buildEdgeHourPlan(args.from, args.to);
-	for (const edge of edgePlan.edges) {
-		if (edge.kind === "raw") {
-			addTopRows(
-				byKey,
-				await summarizeRawTopDimension(ctx, {
-					siteId: args.siteId,
-					from: edge.from,
-					to: edge.to,
-					dimension,
-				}),
-			);
-			continue;
-		}
-		addTopRows(
-			byKey,
-			await queryDimensionRollups(ctx, {
-				siteId: args.siteId,
-				from: edge.bucketStart,
-				to: edge.bucketStart + hourMs,
-				interval: "hour",
-				dimension,
-			}),
-		);
-		for (const excludedRange of edge.excludeRanges) {
-			subtractTopRows(
-				byKey,
-				await summarizeRawTopDimension(ctx, {
-					siteId: args.siteId,
-					from: excludedRange.from,
-					to: excludedRange.to,
-					dimension,
-				}),
-			);
-		}
-	}
-	const plan = buildExactRangePlan(edgePlan.rollupRange.from, edgePlan.rollupRange.to);
-	for (const hourlyRange of plan.hourlyRanges) {
-		const rows = await queryDimensionRollups(ctx, {
-			siteId: args.siteId,
-			from: hourlyRange.from,
-			to: hourlyRange.to,
-			interval: "hour",
-			dimension,
-		});
-		addTopRows(byKey, rows);
-	}
-	if (plan.dailyRange) {
-		const rows = await queryDimensionRollups(ctx, {
-			siteId: args.siteId,
-			from: plan.dailyRange.from,
-			to: plan.dailyRange.to,
-			interval: "day",
-			dimension,
-		});
-		addTopRows(byKey, rows);
-	}
+  const byKey = new Map<string, { count: number; pageviewCount: number }>();
+  const edgePlan = buildEdgeHourPlan(args.from, args.to);
+  for (const edge of edgePlan.edges) {
+    if (edge.kind === "raw") {
+      addTopRows(
+        byKey,
+        await summarizeRawTopDimension(ctx, {
+          siteId: args.siteId,
+          from: edge.from,
+          to: edge.to,
+          dimension,
+        }),
+      );
+      continue;
+    }
+    addTopRows(
+      byKey,
+      await queryDimensionRollups(ctx, {
+        siteId: args.siteId,
+        from: edge.bucketStart,
+        to: edge.bucketStart + hourMs,
+        interval: "hour",
+        dimension,
+      }),
+    );
+    for (const excludedRange of edge.excludeRanges) {
+      subtractTopRows(
+        byKey,
+        await summarizeRawTopDimension(ctx, {
+          siteId: args.siteId,
+          from: excludedRange.from,
+          to: excludedRange.to,
+          dimension,
+        }),
+      );
+    }
+  }
+  const plan = buildExactRangePlan(
+    edgePlan.rollupRange.from,
+    edgePlan.rollupRange.to,
+  );
+  for (const hourlyRange of plan.hourlyRanges) {
+    const rows = await queryDimensionRollups(ctx, {
+      siteId: args.siteId,
+      from: hourlyRange.from,
+      to: hourlyRange.to,
+      interval: "hour",
+      dimension,
+    });
+    addTopRows(byKey, rows);
+  }
+  if (plan.dailyRange) {
+    const rows = await queryDimensionRollups(ctx, {
+      siteId: args.siteId,
+      from: plan.dailyRange.from,
+      to: plan.dailyRange.to,
+      interval: "day",
+      dimension,
+    });
+    addTopRows(byKey, rows);
+  }
 
-	return [...byKey.entries()]
-		.map(([key, value]) => ({ key, ...value }))
-		.sort((left, right) => right.count - left.count)
-		.slice(0, Math.min(limit, 100));
+  return [...byKey.entries()]
+    .map(([key, value]) => ({ key, ...value }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, Math.min(limit, 100));
 }
 
 async function eventPropertyBreakdown(
-	ctx: QueryCtx,
-	args: {
-		siteId: IdOfSite;
-		eventName: string;
-		propertyKey: string;
-		from: number;
-		to: number;
-		limit?: number;
-	},
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    eventName: string;
+    propertyKey: string;
+    from: number;
+    to: number;
+    limit?: number;
+  },
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	const rows = await queryRawEvents(ctx, {
-		siteId: args.siteId,
-		from: args.from,
-		to: args.to,
-	});
-	const byValue = new Map<string, { value: string | number | boolean | null; count: number }>();
-	for (const event of rows) {
-		if (event.eventName !== args.eventName) {
-			continue;
-		}
-		const value = event.properties?.[args.propertyKey];
-		if (value === undefined) {
-			continue;
-		}
-		const serialized = serializePropertyValue(value);
-		const current = byValue.get(serialized) ?? { value, count: 0 };
-		current.count += 1;
-		byValue.set(serialized, current);
-	}
-	return [...byValue.values()]
-		.sort((left, right) => right.count - left.count)
-		.slice(0, Math.min(args.limit ?? 10, 100));
+  if (args.from >= args.to) {
+    return [];
+  }
+  const rows = await queryRawEvents(ctx, {
+    siteId: args.siteId,
+    from: args.from,
+    to: args.to,
+  });
+  const byValue = new Map<
+    string,
+    { value: string | number | boolean | null; count: number }
+  >();
+  for (const event of rows) {
+    if (event.eventName !== args.eventName) {
+      continue;
+    }
+    const value = event.properties?.[args.propertyKey];
+    if (value === undefined) {
+      continue;
+    }
+    const serialized = serializePropertyValue(value);
+    const current = byValue.get(serialized) ?? { value, count: 0 };
+    current.count += 1;
+    byValue.set(serialized, current);
+  }
+  return [...byValue.values()]
+    .sort((left, right) => right.count - left.count)
+    .slice(0, Math.min(args.limit ?? 10, 100));
 }
 
 async function queryTimeseries(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number; interval: "hour" | "day" },
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    from: number;
+    to: number;
+    interval: "hour" | "day";
+  },
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	const bucketMs = args.interval === "hour" ? hourMs : dayMs;
-	const rows =
-		args.interval === "hour"
-			? await queryHourlyRollups(ctx, args, "overview", "all")
-			: await queryDailyRollups(ctx, args, "overview", "all");
-	const [sessionBuckets, visitorBuckets] = await Promise.all([
-		querySessionBucketCounts(ctx, args),
-		queryVisitorBucketCounts(ctx, args),
-	]);
-	const byBucket = new Map<
-		number,
-		{ events: number; pageviews: number; sessions: number; visitors: number }
-	>();
-	for (const row of rows) {
-		const current = byBucket.get(row.bucketStart) ?? {
-			events: 0,
-			pageviews: 0,
-			sessions: 0,
-			visitors: 0,
-		};
-		current.events += row.count;
-		current.pageviews += row.pageviewCount;
-		byBucket.set(row.bucketStart, current);
-	}
-	for (const [bucketStart, count] of sessionBuckets) {
-		const current = byBucket.get(bucketStart) ?? {
-			events: 0,
-			pageviews: 0,
-			sessions: 0,
-			visitors: 0,
-		};
-		current.sessions = (current.sessions ?? 0) + count;
-		byBucket.set(bucketStart, current);
-	}
-	for (const [bucketStart, count] of visitorBuckets) {
-		const current = byBucket.get(bucketStart) ?? {
-			events: 0,
-			pageviews: 0,
-			sessions: 0,
-			visitors: 0,
-		};
-		current.visitors = (current.visitors ?? 0) + count;
-		byBucket.set(bucketStart, current);
-	}
-	const bucketStarts = collectBucketStarts(args.from, args.to, bucketMs);
-	if (bucketStarts.length === 0) {
-		return [];
-	}
-	const firstBucketStart = bucketStarts[0];
-	const lastBucketStart = bucketStarts[bucketStarts.length - 1];
-	if (args.from !== firstBucketStart) {
-		byBucket.set(
-			firstBucketStart,
-			toTimeseriesRow(
-				await aggregateOverviewRange(ctx, {
-					siteId: args.siteId,
-					from: args.from,
-					to: Math.min(args.to, firstBucketStart + bucketMs),
-				}),
-			),
-		);
-	}
-	const lastBucketEnd = lastBucketStart + bucketMs;
-	if (args.to !== lastBucketEnd && lastBucketStart !== firstBucketStart) {
-		byBucket.set(
-			lastBucketStart,
-			toTimeseriesRow(
-				await aggregateOverviewRange(ctx, {
-					siteId: args.siteId,
-					from: Math.max(args.from, lastBucketStart),
-					to: args.to,
-				}),
-			),
-		);
-	} else if (args.to !== lastBucketEnd && lastBucketStart === firstBucketStart) {
-		// A single partial bucket hits both edges. Re-run the exact [from, to)
-		// range so we replace the first-bucket clip above with the correct total.
-		byBucket.set(
-			lastBucketStart,
-			toTimeseriesRow(
-				await aggregateOverviewRange(ctx, {
-					siteId: args.siteId,
-					from: args.from,
-					to: args.to,
-				}),
-			),
-		);
-	}
-	return bucketStarts.map((bucketStart) => ({
-		bucketStart,
-		...(byBucket.get(bucketStart) ?? {
-			events: 0,
-			pageviews: 0,
-			sessions: 0,
-			visitors: 0,
-		}),
-	}));
+  if (args.from >= args.to) {
+    return [];
+  }
+  const bucketMs = args.interval === "hour" ? hourMs : dayMs;
+  const rows =
+    args.interval === "hour"
+      ? await queryHourlyRollups(ctx, args, "overview", "all")
+      : await queryDailyRollups(ctx, args, "overview", "all");
+
+  const byBucket = new Map<
+    number,
+    { events: number; pageviews: number; sessions: number; visitors: number }
+  >();
+  for (const row of rows) {
+    const current = byBucket.get(row.bucketStart) ?? {
+      events: 0,
+      pageviews: 0,
+      sessions: 0,
+      visitors: 0,
+    };
+    current.events += row.count;
+    current.pageviews += row.pageviewCount;
+    current.sessions += row.sessionCount ?? 0;
+    current.visitors += row.visitorCount ?? 0;
+    byBucket.set(row.bucketStart, current);
+  }
+  const bucketStarts = collectBucketStarts(args.from, args.to, bucketMs);
+  if (bucketStarts.length === 0) {
+    return [];
+  }
+  const firstBucketStart = bucketStarts[0];
+  const lastBucketStart = bucketStarts[bucketStarts.length - 1];
+  if (args.from !== firstBucketStart) {
+    byBucket.set(
+      firstBucketStart,
+      toTimeseriesRow(
+        await aggregateOverviewRange(ctx, {
+          siteId: args.siteId,
+          from: args.from,
+          to: Math.min(args.to, firstBucketStart + bucketMs),
+        }),
+      ),
+    );
+  }
+  const lastBucketEnd = lastBucketStart + bucketMs;
+  if (args.to !== lastBucketEnd && lastBucketStart !== firstBucketStart) {
+    byBucket.set(
+      lastBucketStart,
+      toTimeseriesRow(
+        await aggregateOverviewRange(ctx, {
+          siteId: args.siteId,
+          from: Math.max(args.from, lastBucketStart),
+          to: args.to,
+        }),
+      ),
+    );
+  } else if (
+    args.to !== lastBucketEnd &&
+    lastBucketStart === firstBucketStart
+  ) {
+    // A single partial bucket hits both edges. Re-run the exact [from, to)
+    // range so we replace the first-bucket clip above with the correct total.
+    byBucket.set(
+      lastBucketStart,
+      toTimeseriesRow(
+        await aggregateOverviewRange(ctx, {
+          siteId: args.siteId,
+          from: args.from,
+          to: args.to,
+        }),
+      ),
+    );
+  }
+  return bucketStarts.map((bucketStart) => ({
+    bucketStart,
+    ...(byBucket.get(bucketStart) ?? {
+      events: 0,
+      pageviews: 0,
+      sessions: 0,
+      visitors: 0,
+    }),
+  }));
 }
 
 async function aggregateOverviewRange(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	const totals = {
-		count: 0,
-		pageviewCount: 0,
-		bounceCount: 0,
-		durationMs: 0,
-	};
-	const edgePlan = buildEdgeHourPlan(args.from, args.to);
-	for (const edge of edgePlan.edges) {
-		if (edge.kind === "raw") {
-			addOverviewTotals(
-				totals,
-				await summarizeRawOverview(ctx, {
-					siteId: args.siteId,
-					from: edge.from,
-					to: edge.to,
-				}),
-			);
-			continue;
-		}
-		addOverviewTotals(
-			totals,
-			sumRollups(
-				await queryHourlyRollups(
-					ctx,
-					{
-						siteId: args.siteId,
-						from: edge.bucketStart,
-						to: edge.bucketStart + hourMs,
-					},
-					"overview",
-					"all",
-				),
-			),
-		);
-		for (const excludedRange of edge.excludeRanges) {
-			subtractOverviewTotals(
-				totals,
-				await summarizeRawOverview(ctx, {
-					siteId: args.siteId,
-					from: excludedRange.from,
-					to: excludedRange.to,
-				}),
-			);
-		}
-	}
-	const plan = buildExactRangePlan(edgePlan.rollupRange.from, edgePlan.rollupRange.to);
-	for (const hourlyRange of plan.hourlyRanges) {
-		const rows = await queryHourlyRollups(ctx, {
-			siteId: args.siteId,
-			from: hourlyRange.from,
-			to: hourlyRange.to,
-		}, "overview", "all");
-		const sums = sumRollups(rows);
-		totals.count += sums.count;
-		totals.pageviewCount += sums.pageviewCount;
-	}
-	if (plan.dailyRange) {
-		const rows = await queryDailyRollups(ctx, {
-			siteId: args.siteId,
-			from: plan.dailyRange.from,
-			to: plan.dailyRange.to,
-		}, "overview", "all");
-		const sums = sumRollups(rows);
-		totals.count += sums.count;
-		totals.pageviewCount += sums.pageviewCount;
-	}
-	const [sessionStats, visitorCount] = await Promise.all([
-		querySessionStats(ctx, args),
-		queryVisitorCount(ctx, args),
-	]);
-	return {
-		...totals,
-		uniqueVisitorCount: visitorCount,
-		sessionCount: sessionStats.sessionCount,
-	};
+  const totals = {
+    count: 0,
+    pageviewCount: 0,
+    sessionCount: 0,
+    visitorCount: 0,
+    bounceCount: 0,
+    durationMs: 0,
+  };
+  const edgePlan = buildEdgeHourPlan(args.from, args.to);
+  for (const edge of edgePlan.edges) {
+    if (edge.kind === "raw") {
+      addOverviewTotals(
+        totals,
+        await summarizeRawOverview(ctx, {
+          siteId: args.siteId,
+          from: edge.from,
+          to: edge.to,
+        }),
+      );
+      continue;
+    }
+    addOverviewTotals(
+      totals,
+      sumRollups(
+        await queryHourlyRollups(
+          ctx,
+          {
+            siteId: args.siteId,
+            from: edge.bucketStart,
+            to: edge.bucketStart + hourMs,
+          },
+          "overview",
+          "all",
+        ),
+      ),
+    );
+    for (const excludedRange of edge.excludeRanges) {
+      subtractOverviewTotals(
+        totals,
+        await summarizeRawOverview(ctx, {
+          siteId: args.siteId,
+          from: excludedRange.from,
+          to: excludedRange.to,
+        }),
+      );
+    }
+  }
+  const plan = buildExactRangePlan(
+    edgePlan.rollupRange.from,
+    edgePlan.rollupRange.to,
+  );
+  for (const hourlyRange of plan.hourlyRanges) {
+    const rows = await queryHourlyRollups(
+      ctx,
+      {
+        siteId: args.siteId,
+        from: hourlyRange.from,
+        to: hourlyRange.to,
+      },
+      "overview",
+      "all",
+    );
+    const sums = sumRollups(rows);
+    totals.count += sums.count;
+    totals.pageviewCount += sums.pageviewCount;
+    totals.sessionCount += sums.sessionCount;
+    totals.visitorCount += sums.visitorCount;
+    totals.bounceCount += sums.bounceCount;
+    totals.durationMs += sums.durationMs;
+  }
+  if (plan.dailyRange) {
+    const rows = await queryDailyRollups(
+      ctx,
+      {
+        siteId: args.siteId,
+        from: plan.dailyRange.from,
+        to: plan.dailyRange.to,
+      },
+      "overview",
+      "all",
+    );
+    const sums = sumRollups(rows);
+    totals.count += sums.count;
+    totals.pageviewCount += sums.pageviewCount;
+    totals.sessionCount += sums.sessionCount;
+    totals.visitorCount += sums.visitorCount;
+    totals.bounceCount += sums.bounceCount;
+    totals.durationMs += sums.durationMs;
+  }
+
+  return totals;
 }
 
 async function querySessionStats(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	if (args.from >= args.to) {
-		return { sessionCount: 0, bounceCount: 0, durationMs: 0 };
-	}
-	const rows = await readAll(() =>
-		ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.gte("startedAt", args.from)
-				.lt("startedAt", args.to),
-		),
-	);
-	return rows.reduce(
-		(sum, row) => ({
-			sessionCount: sum.sessionCount + 1,
-			bounceCount: sum.bounceCount + (row.pageviewCount <= 1 ? 1 : 0),
-			durationMs: sum.durationMs + Math.max(0, row.lastSeenAt - row.startedAt),
-		}),
-		{ sessionCount: 0, bounceCount: 0, durationMs: 0 },
-	);
+  if (args.from >= args.to) {
+    return { sessionCount: 0, bounceCount: 0, durationMs: 0 };
+  }
+  const rows = await readAll(() =>
+    ctx.db
+      .query("sessions")
+      .withIndex("by_siteId_and_startedAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("startedAt", args.from)
+          .lt("startedAt", args.to),
+      ),
+  );
+  return rows.reduce(
+    (sum, row) => ({
+      sessionCount: sum.sessionCount + 1,
+      bounceCount: sum.bounceCount + (row.pageviewCount <= 1 ? 1 : 0),
+      durationMs: sum.durationMs + Math.max(0, row.lastSeenAt - row.startedAt),
+    }),
+    { sessionCount: 0, bounceCount: 0, durationMs: 0 },
+  );
 }
 
 async function queryRawEvents(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	return await readAll(() =>
-		ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.gte("occurredAt", args.from)
-				.lt("occurredAt", args.to),
-		),
-	);
+  if (args.from >= args.to) {
+    return [];
+  }
+  return await readAll(() =>
+    ctx.db
+      .query("events")
+      .withIndex("by_siteId_and_occurredAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("occurredAt", args.from)
+          .lt("occurredAt", args.to),
+      ),
+  );
 }
 
 async function summarizeRawOverview(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	if (args.from >= args.to) {
-		return {
-			count: 0,
-			uniqueVisitorCount: 0,
-			sessionCount: 0,
-			pageviewCount: 0,
-			bounceCount: 0,
-			durationMs: 0,
-		};
-	}
-	const totals = {
-		count: 0,
-		pageviewCount: 0,
-	};
-	for await (const event of ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
-		q
-			.eq("siteId", args.siteId)
-			.gte("occurredAt", args.from)
-			.lt("occurredAt", args.to),
-	)) {
-		totals.count += 1;
-		totals.pageviewCount += event.eventType === "pageview" ? 1 : 0;
-	}
-	const [sessionStats, visitorCount] = await Promise.all([
-		querySessionStats(ctx, args),
-		queryVisitorCount(ctx, args),
-	]);
-	return {
-		count: totals.count,
-		uniqueVisitorCount: visitorCount,
-		sessionCount: sessionStats.sessionCount,
-		pageviewCount: totals.pageviewCount,
-		bounceCount: sessionStats.bounceCount,
-		durationMs: sessionStats.durationMs,
-	};
+  if (args.from >= args.to) {
+    return {
+      count: 0,
+      visitorCount: 0,
+      sessionCount: 0,
+      pageviewCount: 0,
+      bounceCount: 0,
+      durationMs: 0,
+    };
+  }
+  const totals = {
+    count: 0,
+    pageviewCount: 0,
+  };
+  for await (const event of ctx.db
+    .query("events")
+    .withIndex("by_siteId_and_occurredAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .gte("occurredAt", args.from)
+        .lt("occurredAt", args.to),
+    )) {
+    totals.count += 1;
+    totals.pageviewCount += event.eventType === "pageview" ? 1 : 0;
+  }
+  const [sessionStats, visitorCount] = await Promise.all([
+    querySessionStats(ctx, args),
+    queryVisitorCount(ctx, args),
+  ]);
+  return {
+    count: totals.count,
+    visitorCount: visitorCount,
+    sessionCount: sessionStats.sessionCount,
+    pageviewCount: totals.pageviewCount,
+    bounceCount: sessionStats.bounceCount,
+    durationMs: sessionStats.durationMs,
+  };
 }
 
 async function querySessionBucketCounts(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number; interval: "hour" | "day" },
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    from: number;
+    to: number;
+    interval: "hour" | "day";
+  },
 ) {
-	const bucketMs = args.interval === "hour" ? hourMs : dayMs;
-	const counts = new Map<number, number>();
-	if (args.from >= args.to) {
-		return counts;
-	}
-	for await (const row of ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
-		q
-			.eq("siteId", args.siteId)
-			.gte("startedAt", args.from)
-			.lt("startedAt", args.to),
-	)) {
-		const bucketStart = floorToBucket(row.startedAt, bucketMs);
-		counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
-	}
-	return counts;
+  const bucketMs = args.interval === "hour" ? hourMs : dayMs;
+  const counts = new Map<number, number>();
+  if (args.from >= args.to) {
+    return counts;
+  }
+  for await (const row of ctx.db
+    .query("sessions")
+    .withIndex("by_siteId_and_startedAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .gte("startedAt", args.from)
+        .lt("startedAt", args.to),
+    )) {
+    const bucketStart = floorToBucket(row.startedAt, bucketMs);
+    counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
+  }
+  return counts;
 }
 
 async function queryVisitorBucketCounts(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number; interval: "hour" | "day" },
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    from: number;
+    to: number;
+    interval: "hour" | "day";
+  },
 ) {
-	const bucketMs = args.interval === "hour" ? hourMs : dayMs;
-	const counts = new Map<number, number>();
-	if (args.from >= args.to) {
-		return counts;
-	}
-	for await (const row of ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
-		q
-			.eq("siteId", args.siteId)
-			.gte("firstSeenAt", args.from)
-			.lt("firstSeenAt", args.to),
-	)) {
-		const bucketStart = floorToBucket(row.firstSeenAt, bucketMs);
-		counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
-	}
-	return counts;
+  const bucketMs = args.interval === "hour" ? hourMs : dayMs;
+  const counts = new Map<number, number>();
+  if (args.from >= args.to) {
+    return counts;
+  }
+  for await (const row of ctx.db
+    .query("visitors")
+    .withIndex("by_siteId_and_firstSeenAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .gte("firstSeenAt", args.from)
+        .lt("firstSeenAt", args.to),
+    )) {
+    const bucketStart = floorToBucket(row.firstSeenAt, bucketMs);
+    counts.set(bucketStart, (counts.get(bucketStart) ?? 0) + 1);
+  }
+  return counts;
 }
 
 async function queryVisitorCount(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	if (args.from >= args.to) {
-		return 0;
-	}
-	const rows = await readAll(() =>
-		ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.gte("firstSeenAt", args.from)
-				.lt("firstSeenAt", args.to),
-		),
-	);
-	return rows.length;
+  if (args.from >= args.to) {
+    return 0;
+  }
+  const rows = await readAll(() =>
+    ctx.db
+      .query("visitors")
+      .withIndex("by_siteId_and_firstSeenAt", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .gte("firstSeenAt", args.from)
+          .lt("firstSeenAt", args.to),
+      ),
+  );
+  return rows.length;
 }
 
 async function summarizeRawTopDimension(
-	ctx: QueryCtx,
-	args: { siteId: IdOfSite; from: number; to: number; dimension: string },
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number; dimension: string },
 ) {
-	const byKey = new Map<string, { count: number; pageviewCount: number }>();
-	if (args.from >= args.to) {
-		return [];
-	}
-	for await (const event of ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
-		q
-			.eq("siteId", args.siteId)
-			.gte("occurredAt", args.from)
-			.lt("occurredAt", args.to),
-	)) {
-		const key = keyForEventDimension(event, args.dimension);
-		if (!key) {
-			continue;
-		}
-		const current = byKey.get(key) ?? { count: 0, pageviewCount: 0 };
-		current.count += 1;
-		current.pageviewCount += event.eventType === "pageview" ? 1 : 0;
-		byKey.set(key, current);
-	}
-	return [...byKey.entries()].map(([key, value]) => ({ key, ...value }));
+  const byKey = new Map<string, { count: number; pageviewCount: number }>();
+  if (args.from >= args.to) {
+    return [];
+  }
+  for await (const event of ctx.db
+    .query("events")
+    .withIndex("by_siteId_and_occurredAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .gte("occurredAt", args.from)
+        .lt("occurredAt", args.to),
+    )) {
+    const key = keyForEventDimension(event, args.dimension);
+    if (!key) {
+      continue;
+    }
+    const current = byKey.get(key) ?? { count: 0, pageviewCount: 0 };
+    current.count += 1;
+    current.pageviewCount += event.eventType === "pageview" ? 1 : 0;
+    byKey.set(key, current);
+  }
+  return [...byKey.entries()].map(([key, value]) => ({ key, ...value }));
 }
 
 async function queryDimensionRollups(
-	ctx: QueryCtx,
-	args: {
-		siteId: IdOfSite;
-		from: number;
-		to: number;
-		interval: "hour" | "day";
-		dimension: string;
-	},
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    from: number;
+    to: number;
+    interval: "hour" | "day";
+    dimension: string;
+  },
 ) {
-	if (args.from >= args.to) {
-		return [];
-	}
-	return await readAll(() =>
-		ctx.db
-			.query("rollups")
-			.withIndex("by_site_interval_dimension_bucket", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("interval", args.interval)
-					.eq("dimension", args.dimension)
-					.gte("bucketStart", args.from)
-					.lt("bucketStart", args.to),
-			),
-	);
+  if (args.from >= args.to) {
+    return [];
+  }
+  return await readAll(() =>
+    ctx.db
+      .query("rollups")
+      .withIndex("by_site_interval_dimension_bucket", (q) =>
+        q
+          .eq("siteId", args.siteId)
+          .eq("interval", args.interval)
+          .eq("dimension", args.dimension)
+          .gte("bucketStart", args.from)
+          .lt("bucketStart", args.to),
+      ),
+  );
 }
 
 type ScanQuery<T> = AsyncIterable<T>;
 
 async function readAll<T>(createQuery: () => ScanQuery<T>) {
-	const rows: T[] = [];
-	let count = 0;
-	for await (const row of createQuery()) {
-		rows.push(row);
-		count += 1;
-		if (count >= scanPageSize * 1_024) {
-			throw new Error("Query scan exceeded component safety limit");
-		}
-	}
-	return rows;
+  const rows: T[] = [];
+  let count = 0;
+  for await (const row of createQuery()) {
+    rows.push(row);
+    count += 1;
+    if (count >= scanPageSize * 1_024) {
+      throw new Error("Query scan exceeded component safety limit");
+    }
+  }
+  return rows;
 }
 
 function buildExactRangePlan(from: number, to: number) {
-	const rawRanges: Array<{ from: number; to: number }> = [];
-	if (from >= to) {
-		return {
-			rawRanges,
-			hourlyRanges: [] as Array<{ from: number; to: number }>,
-			dailyRange: null as null | { from: number; to: number },
-		};
-	}
-	const firstFullHour = ceilToBucket(from, hourMs);
-	const rawHeadEnd = Math.min(to, firstFullHour);
-	addRange(rawRanges, from, rawHeadEnd);
+  const rawRanges: Array<{ from: number; to: number }> = [];
+  if (from >= to) {
+    return {
+      rawRanges,
+      hourlyRanges: [] as Array<{ from: number; to: number }>,
+      dailyRange: null as null | { from: number; to: number },
+    };
+  }
+  const firstFullHour = ceilToBucket(from, hourMs);
+  const rawHeadEnd = Math.min(to, firstFullHour);
+  addRange(rawRanges, from, rawHeadEnd);
 
-	const hourlyStart = rawHeadEnd;
-	const rawTailStartBase = floorToBucket(to, hourMs);
-	const hourlyEnd = Math.min(to, rawTailStartBase);
+  const hourlyStart = rawHeadEnd;
+  const rawTailStartBase = floorToBucket(to, hourMs);
+  const hourlyEnd = Math.min(to, rawTailStartBase);
 
-	const hourlyRanges: Array<{ from: number; to: number }> = [];
-	let dailyRange: null | { from: number; to: number } = null;
-	if (hourlyStart < hourlyEnd) {
-		const firstFullDay = ceilToBucket(hourlyStart, dayMs);
-		const lastFullDay = floorToBucket(hourlyEnd, dayMs);
-		if (firstFullDay < lastFullDay) {
-			addRange(hourlyRanges, hourlyStart, firstFullDay);
-			dailyRange = { from: firstFullDay, to: lastFullDay };
-			addRange(hourlyRanges, lastFullDay, hourlyEnd);
-		} else {
-			addRange(hourlyRanges, hourlyStart, hourlyEnd);
-		}
-	}
+  const hourlyRanges: Array<{ from: number; to: number }> = [];
+  let dailyRange: null | { from: number; to: number } = null;
+  if (hourlyStart < hourlyEnd) {
+    const firstFullDay = ceilToBucket(hourlyStart, dayMs);
+    const lastFullDay = floorToBucket(hourlyEnd, dayMs);
+    if (firstFullDay < lastFullDay) {
+      addRange(hourlyRanges, hourlyStart, firstFullDay);
+      dailyRange = { from: firstFullDay, to: lastFullDay };
+      addRange(hourlyRanges, lastFullDay, hourlyEnd);
+    } else {
+      addRange(hourlyRanges, hourlyStart, hourlyEnd);
+    }
+  }
 
-	const rawTailStart = Math.max(rawHeadEnd, rawTailStartBase);
-	addRange(rawRanges, rawTailStart, to);
+  const rawTailStart = Math.max(rawHeadEnd, rawTailStartBase);
+  addRange(rawRanges, rawTailStart, to);
 
-	return { rawRanges, hourlyRanges, dailyRange };
+  return { rawRanges, hourlyRanges, dailyRange };
 }
 
 function addRange(
-	ranges: Array<{ from: number; to: number }>,
-	from: number,
-	to: number,
+  ranges: Array<{ from: number; to: number }>,
+  from: number,
+  to: number,
 ) {
-	if (from < to) {
-		ranges.push({ from, to });
-	}
+  if (from < to) {
+    ranges.push({ from, to });
+  }
 }
 
 function ceilToBucket(value: number, bucketMs: number) {
-	return floorToBucket(value + bucketMs - 1, bucketMs);
+  return floorToBucket(value + bucketMs - 1, bucketMs);
 }
 
 function collectBucketStarts(from: number, to: number, bucketMs: number) {
-	if (from >= to) {
-		return [];
-	}
-	const starts: number[] = [];
-	for (
-		let bucketStart = floorToBucket(from, bucketMs);
-		bucketStart < to;
-		bucketStart += bucketMs
-	) {
-		starts.push(bucketStart);
-	}
-	return starts;
+  if (from >= to) {
+    return [];
+  }
+  const starts: number[] = [];
+  for (
+    let bucketStart = floorToBucket(from, bucketMs);
+    bucketStart < to;
+    bucketStart += bucketMs
+  ) {
+    starts.push(bucketStart);
+  }
+  return starts;
 }
 
 function toTimeseriesRow(row: {
-	count: number;
-	pageviewCount: number;
-	sessionCount?: number;
-	uniqueVisitorCount?: number;
+  count: number;
+  pageviewCount: number;
+  sessionCount: number;
+  visitorCount: number;
 }) {
-	return {
-		events: row.count,
-		pageviews: row.pageviewCount,
-		sessions: row.sessionCount ?? 0,
-		visitors: row.uniqueVisitorCount ?? 0,
-	};
+  return {
+    events: row.count,
+    pageviews: row.pageviewCount,
+    sessions: row.sessionCount,
+    visitors: row.visitorCount,
+  };
 }
 
 function keyForEventDimension(
-	event: {
-		eventName: string;
-		eventType: "pageview" | "track" | "identify";
-		path?: string;
-		referrer?: string;
-		device?: string;
-		browser?: string;
-		os?: string;
-		country?: string;
-		utmSource?: string;
-		utmMedium?: string;
-		utmCampaign?: string;
-	},
-	dimension: string,
+  event: {
+    eventName: string;
+    eventType: "pageview" | "track" | "identify";
+    path?: string;
+    referrer?: string;
+    device?: string;
+    browser?: string;
+    os?: string;
+    country?: string;
+    utmSource?: string;
+    utmMedium?: string;
+    utmCampaign?: string;
+  },
+  dimension: string,
 ) {
-	switch (dimension) {
-		case "event":
-			return event.eventName;
-		case "page":
-			return event.eventType === "pageview" ? event.path : undefined;
-		case "referrer":
-			return event.referrer;
-		case "device":
-			return event.device;
-		case "browser":
-			return event.browser;
-		case "os":
-			return event.os;
-		case "country":
-			return event.country;
-		case "utmSource":
-			return event.utmSource;
-		case "utmMedium":
-			return event.utmMedium;
-		case "utmCampaign":
-			return event.utmCampaign;
-		default:
-			return undefined;
-	}
+  switch (dimension) {
+    case "event":
+      return event.eventName;
+    case "page":
+      return event.eventType === "pageview" ? event.path : undefined;
+    case "referrer":
+      return event.referrer;
+    case "device":
+      return event.device;
+    case "browser":
+      return event.browser;
+    case "os":
+      return event.os;
+    case "country":
+      return event.country;
+    case "utmSource":
+      return event.utmSource;
+    case "utmMedium":
+      return event.utmMedium;
+    case "utmCampaign":
+      return event.utmCampaign;
+    default:
+      return undefined;
+  }
 }
 
 function addTopRows(
-	byKey: Map<string, { count: number; pageviewCount: number }>,
-	rows: Array<{ key: string; count: number; pageviewCount: number }>,
+  byKey: Map<string, { count: number; pageviewCount: number }>,
+  rows: Array<{ key: string; count: number; pageviewCount: number }>,
 ) {
-	for (const row of rows) {
-		const current = byKey.get(row.key) ?? { count: 0, pageviewCount: 0 };
-		current.count += row.count;
-		current.pageviewCount += row.pageviewCount;
-		byKey.set(row.key, current);
-	}
+  for (const row of rows) {
+    const current = byKey.get(row.key) ?? { count: 0, pageviewCount: 0 };
+    current.count += row.count;
+    current.pageviewCount += row.pageviewCount;
+    byKey.set(row.key, current);
+  }
 }
 
 function subtractTopRows(
-	byKey: Map<string, { count: number; pageviewCount: number }>,
-	rows: Array<{ key: string; count: number; pageviewCount: number }>,
+  byKey: Map<string, { count: number; pageviewCount: number }>,
+  rows: Array<{ key: string; count: number; pageviewCount: number }>,
 ) {
-	for (const row of rows) {
-		const current = byKey.get(row.key);
-		if (!current) {
-			continue;
-		}
-		current.count -= row.count;
-		current.pageviewCount -= row.pageviewCount;
-		if (current.count <= 0 && current.pageviewCount <= 0) {
-			byKey.delete(row.key);
-			continue;
-		}
-		byKey.set(row.key, current);
-	}
+  for (const row of rows) {
+    const current = byKey.get(row.key);
+    if (!current) {
+      continue;
+    }
+    current.count -= row.count;
+    current.pageviewCount -= row.pageviewCount;
+    if (current.count <= 0 && current.pageviewCount <= 0) {
+      byKey.delete(row.key);
+      continue;
+    }
+    byKey.set(row.key, current);
+  }
 }
 
 function addOverviewTotals(
-	target: {
-		count: number;
-		pageviewCount: number;
-		bounceCount: number;
-		durationMs: number;
-	},
-	source: {
-		count: number;
-		pageviewCount: number;
-		bounceCount: number;
-		durationMs: number;
-	},
+  target: {
+    count: number;
+    pageviewCount: number;
+    sessionCount: number;
+    visitorCount: number;
+    bounceCount: number;
+    durationMs: number;
+  },
+  source: {
+    count: number;
+    pageviewCount: number;
+    sessionCount: number;
+    visitorCount: number;
+    bounceCount: number;
+    durationMs: number;
+  },
 ) {
-	target.count += source.count;
-	target.pageviewCount += source.pageviewCount;
-	target.bounceCount += source.bounceCount;
-	target.durationMs += source.durationMs;
+  target.count += source.count;
+  target.pageviewCount += source.pageviewCount;
+  target.sessionCount += source.sessionCount;
+  target.visitorCount += source.visitorCount;
+  target.bounceCount += source.bounceCount;
+  target.durationMs += source.durationMs;
 }
 
 function subtractOverviewTotals(
-	target: {
-		count: number;
-		pageviewCount: number;
-		bounceCount: number;
-		durationMs: number;
-	},
-	source: {
-		count: number;
-		pageviewCount: number;
-		bounceCount: number;
-		durationMs: number;
-	},
+  target: {
+    count: number;
+    pageviewCount: number;
+    sessionCount: number;
+    visitorCount: number;
+    bounceCount: number;
+    durationMs: number;
+  },
+  source: {
+    count: number;
+    pageviewCount: number;
+    sessionCount: number;
+    visitorCount: number;
+    bounceCount: number;
+    durationMs: number;
+  },
 ) {
-	target.count -= source.count;
-	target.pageviewCount -= source.pageviewCount;
-	target.bounceCount -= source.bounceCount;
-	target.durationMs -= source.durationMs;
+  target.count -= source.count;
+  target.pageviewCount -= source.pageviewCount;
+  target.sessionCount -= source.sessionCount;
+  target.visitorCount -= source.visitorCount;
+  target.bounceCount -= source.bounceCount;
+  target.durationMs -= source.durationMs;
 }
 
 function buildEdgeHourPlan(from: number, to: number) {
-	const edges: Array<
-		| { kind: "raw"; from: number; to: number }
-		| {
-				kind: "rollup";
-				bucketStart: number;
-				excludeRanges: Array<{ from: number; to: number }>;
-		  }
-	> = [];
-	if (from >= to) {
-		return {
-			edges,
-			rollupRange: { from, to },
-		};
-	}
+  const edges: Array<
+    | { kind: "raw"; from: number; to: number }
+    | {
+        kind: "rollup";
+        bucketStart: number;
+        excludeRanges: Array<{ from: number; to: number }>;
+      }
+  > = [];
+  if (from >= to) {
+    return {
+      edges,
+      rollupRange: { from, to },
+    };
+  }
 
-	const firstBucketStart = floorToBucket(from, hourMs);
-	const firstBucketEnd = firstBucketStart + hourMs;
-	let rollupFrom = from;
-	if (from > firstBucketStart) {
-		const overlapEnd = Math.min(to, firstBucketEnd);
-		edges.push(
-			choosePartialHourStrategy({
-				bucketStart: firstBucketStart,
-				insideFrom: from,
-				insideTo: overlapEnd,
-			}),
-		);
-		rollupFrom = firstBucketEnd;
-	}
+  const firstBucketStart = floorToBucket(from, hourMs);
+  const firstBucketEnd = firstBucketStart + hourMs;
+  let rollupFrom = from;
+  if (from > firstBucketStart) {
+    const overlapEnd = Math.min(to, firstBucketEnd);
+    edges.push(
+      choosePartialHourStrategy({
+        bucketStart: firstBucketStart,
+        insideFrom: from,
+        insideTo: overlapEnd,
+      }),
+    );
+    rollupFrom = firstBucketEnd;
+  }
 
-	const lastBucketStart = floorToBucket(to - 1, hourMs);
-	let rollupTo = to;
-	if (to < lastBucketStart + hourMs && lastBucketStart >= rollupFrom) {
-		edges.push(
-			choosePartialHourStrategy({
-				bucketStart: lastBucketStart,
-				insideFrom: Math.max(from, lastBucketStart),
-				insideTo: to,
-			}),
-		);
-		rollupTo = lastBucketStart;
-	}
+  const lastBucketStart = floorToBucket(to - 1, hourMs);
+  let rollupTo = to;
+  if (to < lastBucketStart + hourMs && lastBucketStart >= rollupFrom) {
+    edges.push(
+      choosePartialHourStrategy({
+        bucketStart: lastBucketStart,
+        insideFrom: Math.max(from, lastBucketStart),
+        insideTo: to,
+      }),
+    );
+    rollupTo = lastBucketStart;
+  }
 
-	return {
-		edges,
-		rollupRange:
-			rollupFrom < rollupTo
-				? {
-						from: rollupFrom,
-						to: rollupTo,
-					}
-				: {
-						from: rollupTo,
-						to: rollupTo,
-					},
-	};
+  return {
+    edges,
+    rollupRange:
+      rollupFrom < rollupTo
+        ? {
+            from: rollupFrom,
+            to: rollupTo,
+          }
+        : {
+            from: rollupTo,
+            to: rollupTo,
+          },
+  };
 }
 
 function choosePartialHourStrategy(args: {
-	bucketStart: number;
-	insideFrom: number;
-	insideTo: number;
+  bucketStart: number;
+  insideFrom: number;
+  insideTo: number;
 }) {
-	const bucketEnd = args.bucketStart + hourMs;
-	const insideDuration = Math.max(0, args.insideTo - args.insideFrom);
-	const excludeRanges = [
-		{ from: args.bucketStart, to: args.insideFrom },
-		{ from: args.insideTo, to: bucketEnd },
-	].filter((range) => range.from < range.to);
-	const outsideDuration = excludeRanges.reduce(
-		(sum, range) => sum + range.to - range.from,
-		0,
-	);
+  const bucketEnd = args.bucketStart + hourMs;
+  const insideDuration = Math.max(0, args.insideTo - args.insideFrom);
+  const excludeRanges = [
+    { from: args.bucketStart, to: args.insideFrom },
+    { from: args.insideTo, to: bucketEnd },
+  ].filter((range) => range.from < range.to);
+  const outsideDuration = excludeRanges.reduce(
+    (sum, range) => sum + range.to - range.from,
+    0,
+  );
 
-	if (insideDuration <= outsideDuration) {
-		return {
-			kind: "raw" as const,
-			from: args.insideFrom,
-			to: args.insideTo,
-		};
-	}
+  if (insideDuration <= outsideDuration) {
+    return {
+      kind: "raw" as const,
+      from: args.insideFrom,
+      to: args.insideTo,
+    };
+  }
 
-	return {
-		kind: "rollup" as const,
-		bucketStart: args.bucketStart,
-		excludeRanges,
-	};
+  return {
+    kind: "rollup" as const,
+    bucketStart: args.bucketStart,
+    excludeRanges,
+  };
 }
 
 function serializePropertyValue(value: string | number | boolean | null) {
-	return value === null ? "null" : `${typeof value}:${String(value)}`;
+  return value === null ? "null" : `${typeof value}:${String(value)}`;
 }

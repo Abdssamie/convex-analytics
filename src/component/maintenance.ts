@@ -4,7 +4,7 @@ import { v } from "convex/values";
 import { api, internal } from "./_generated/api";
 import type { IdOfSite } from "./types";
 import { cleanupBatchLimit } from "./constants";
-import { daysToMs, deleteRows } from "./helpers";
+import { daysToMs, deleteRows, manualPaginate } from "./helpers";
 import { siteValidator } from "./types";
 
 const cleanupPageSize = 100;
@@ -154,23 +154,24 @@ export const deleteEventsPage = internalMutation({
 		isDone: v.boolean(),
 	}),
 	handler: async (ctx, args) => {
-		const page = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_occurredAt", (q) =>
+		const paginationResult = await manualPaginate(
+			ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
 				q.eq("siteId", args.siteId).lt("occurredAt", args.cutoff),
-			)
-			.paginate({
+			),
+			{
 				numItems: Math.max(
 					1,
 					Math.min(args.limit ?? cleanupPageSize, cleanupPageSize),
 				),
 				cursor: args.cursor,
-			});
-		await deleteRows(ctx, page.page);
+			},
+		);
+
+		await deleteRows(ctx, paginationResult.page);
 		return {
-			deleted: page.page.length,
-			continueCursor: page.isDone ? null : page.continueCursor,
-			isDone: page.isDone,
+			deleted: paginationResult.page.length,
+			continueCursor: paginationResult.continueCursor,
+			isDone: paginationResult.isDone,
 		};
 	},
 });
@@ -189,26 +190,27 @@ export const deleteRollupsPage = internalMutation({
 		isDone: v.boolean(),
 	}),
 	handler: async (ctx, args) => {
-		const page = await ctx.db
-			.query("rollups")
-			.withIndex("by_site_interval_bucket", (q) =>
+		const paginationResult = await manualPaginate(
+			ctx.db.query("rollups").withIndex("by_site_interval_bucket", (q) =>
 				q
 					.eq("siteId", args.siteId)
 					.eq("interval", args.interval)
 					.lt("bucketStart", args.cutoff),
-			)
-			.paginate({
+			),
+			{
 				numItems: Math.max(
 					1,
 					Math.min(args.limit ?? cleanupPageSize, cleanupPageSize),
 				),
 				cursor: args.cursor,
-			});
-		await deleteRows(ctx, page.page);
+			},
+		);
+
+		await deleteRows(ctx, paginationResult.page);
 		return {
-			deleted: page.page.length,
-			continueCursor: page.isDone ? null : page.continueCursor,
-			isDone: page.isDone,
+			deleted: paginationResult.page.length,
+			continueCursor: paginationResult.continueCursor,
+			isDone: paginationResult.isDone,
 		};
 	},
 });

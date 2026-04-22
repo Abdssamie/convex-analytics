@@ -8,21 +8,47 @@ import { installAnalyticsLoadHarness } from "./loadHarness";
 
 const writeKey = import.meta.env.VITE_ANALYTICS_WRITE_KEY ?? "write_demo_local";
 
-function DashboardView(props: {
-  onBack: () => void;
-}) {
+function DashboardView(props: { onBack: () => void }) {
   const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
 
   return (
     <main className="shell">
-      <div style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div
+        style={{
+          marginBottom: 24,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+        }}
+      >
         <button onClick={props.onBack}>← Back to Demo</button>
         <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
           Connected to site: <strong>{site?.slug ?? "..."}</strong>
         </p>
       </div>
       {site ? (
-        <AnalyticsDashboard siteId={site._id} api={api.example} />
+        <AnalyticsDashboard
+          siteId={site._id}
+          api={{
+            getDashboardSummary: api.example.getDashboardSummary,
+            getOverview: api.example.getOverview,
+            getTimeseries: api.example.getTimeseries,
+            getTopPages: api.example.getTopPages,
+            getTopReferrers: api.example.getTopReferrers,
+            getTopSources: api.example.getTopSources,
+            getTopMediums: api.example.getTopMediums,
+            getTopCampaigns: api.example.getTopCampaigns,
+            getTopEvents: api.example.getTopEvents,
+            getTopDevices: api.example.getTopDevices,
+            getTopBrowsers: api.example.getTopBrowsers,
+            getTopOs: api.example.getTopOs,
+            getTopCountries: api.example.getTopCountries,
+            listRawEvents: api.example.listRawEvents,
+            listPageviews: api.example.listPageviews,
+            listSessions: api.example.listSessions,
+            listVisitors: api.example.listVisitors,
+          }}
+        />
       ) : site === null ? (
         <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
           Run <code>npx convex run example:setupDefaultSite</code> once.
@@ -101,12 +127,21 @@ function App() {
 
   return (
     <main className="shell">
-      <nav style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
-        <button onClick={() => navigate("/dashboard")}>View Analytics Dashboard →</button>
+      <nav
+        style={{
+          display: "flex",
+          justifyContent: "flex-end",
+          marginBottom: 12,
+        }}
+      >
+        <button onClick={() => navigate("/dashboard")}>
+          View Analytics Dashboard →
+        </button>
       </nav>
       {site === null ? (
         <p className="status">
-          Setup missing. Run <code>npx convex run example:setupDefaultSite</code> once.
+          Setup missing. Run{" "}
+          <code>npx convex run example:setupDefaultSite</code> once.
         </p>
       ) : null}
       <section className="hero">

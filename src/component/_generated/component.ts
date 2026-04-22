@@ -24,6 +24,39 @@ import type { FunctionReference } from "convex/server";
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
     analytics: {
+      getDashboardSummary: FunctionReference<
+        "query",
+        "internal",
+        { from: number; interval: "hour" | "day"; siteId: string; to: number },
+        {
+          overview: {
+            averageSessionDurationMs: number;
+            bounceRate: number;
+            events: number;
+            pageviews: number;
+            sessions: number;
+            visitors: number;
+          };
+          timeseries: Array<{
+            bucketStart: number;
+            events: number;
+            pageviews: number;
+            sessions: number;
+            visitors: number;
+          }>;
+          topPages: Array<{
+            count: number;
+            key: string;
+            pageviewCount: number;
+          }>;
+          topSources: Array<{
+            count: number;
+            key: string;
+            pageviewCount: number;
+          }>;
+        },
+        Name
+      >;
       getEventPropertyBreakdown: FunctionReference<
         "query",
         "internal",
@@ -65,7 +98,28 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         }>,
         Name
       >;
+      getTopBrowsers: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
       getTopCampaigns: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
+      getTopCountries: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
+      getTopDevices: FunctionReference<
         "query",
         "internal",
         { from: number; limit?: number; siteId: string; to: number },
@@ -80,6 +134,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
       getTopMediums: FunctionReference<
+        "query",
+        "internal",
+        { from: number; limit?: number; siteId: string; to: number },
+        Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
+      getTopOs: FunctionReference<
         "query",
         "internal",
         { from: number; limit?: number; siteId: string; to: number },
@@ -105,6 +166,54 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         { from: number; limit?: number; siteId: string; to: number },
         Array<{ count: number; key: string; pageviewCount: number }>,
+        Name
+      >;
+      listPageviews: FunctionReference<
+        "query",
+        "internal",
+        {
+          from?: number;
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+          siteId: string;
+          to?: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          page: Array<{
+            _creationTime: number;
+            _id: string;
+            aggregatedAt?: number | null;
+            browser?: string;
+            country?: string;
+            device?: string;
+            eventName: string;
+            eventType: "pageview" | "track" | "identify";
+            identifiedUserId?: string;
+            occurredAt: number;
+            os?: string;
+            path?: string;
+            properties?: Record<string, string | number | boolean | null>;
+            receivedAt: number;
+            referrer?: string;
+            sessionId: string;
+            siteId: string;
+            title?: string;
+            utmCampaign?: string;
+            utmMedium?: string;
+            utmSource?: string;
+            visitorId: string;
+          }>;
+          pageStatus?: string | null;
+          splitCursor?: string | null;
+        },
         Name
       >;
       listRawEvents: FunctionReference<
@@ -193,6 +302,40 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             utmCampaign?: string;
             utmMedium?: string;
             utmSource?: string;
+            visitorId: string;
+          }>;
+          pageStatus?: string | null;
+          splitCursor?: string | null;
+        },
+        Name
+      >;
+      listVisitors: FunctionReference<
+        "query",
+        "internal",
+        {
+          from?: number;
+          paginationOpts: {
+            cursor: string | null;
+            endCursor?: string | null;
+            id?: number;
+            maximumBytesRead?: number;
+            maximumRowsRead?: number;
+            numItems: number;
+          };
+          siteId: string;
+          to?: number;
+        },
+        {
+          continueCursor: string | null;
+          isDone: boolean;
+          page: Array<{
+            _creationTime: number;
+            _id: string;
+            firstSeenAt: number;
+            identifiedUserId?: string;
+            lastSeenAt: number;
+            siteId: string;
+            traits?: Record<string, string | number | boolean | null>;
             visitorId: string;
           }>;
           pageStatus?: string | null;

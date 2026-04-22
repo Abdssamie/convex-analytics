@@ -7,13 +7,12 @@ import {
 import { v } from "convex/values";
 
 async function hashWriteKey(writeKey: string) {
-	const bytes = new TextEncoder().encode(writeKey);
-	const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
-	return [...new Uint8Array(digest)]
-		.map((byte) => byte.toString(16).padStart(2, "0"))
-		.join("");
+  const bytes = new TextEncoder().encode(writeKey);
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
-
 
 export const {
   createSite,
@@ -26,6 +25,7 @@ export const {
 });
 
 export const {
+  getDashboardSummary,
   getOverview,
   getTimeseries,
   getTopPages,
@@ -34,8 +34,14 @@ export const {
   getTopMediums,
   getTopCampaigns,
   getTopEvents,
+  getTopDevices,
+  getTopBrowsers,
+  getTopOs,
+  getTopCountries,
   listRawEvents,
+  listPageviews,
   listSessions,
+  listVisitors,
 } = exposeAnalyticsApi(components.convexAnalytics, {
   auth: async () => {},
 });
@@ -97,12 +103,15 @@ export const ingestExampleBatch = mutation({
     ),
   },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(components.convexAnalytics.ingest.ingestBatch, {
-      writeKeyHash: await hashWriteKey(args.writeKey),
-      origin: args.origin,
-      visitorId: args.visitorId,
-      sessionId: args.sessionId,
-      events: args.events,
-    });
+    return await ctx.runMutation(
+      components.convexAnalytics.ingest.ingestBatch,
+      {
+        writeKeyHash: await hashWriteKey(args.writeKey),
+        origin: args.origin,
+        visitorId: args.visitorId,
+        sessionId: args.sessionId,
+        events: args.events,
+      },
+    );
   },
 });

@@ -162,43 +162,135 @@ export async function aggregateEventsByIds(
 	let failed = 0;
 	const now = Date.now();
 	const rollupDeltas = new Map<string, RollupDelta>();
+	const visitorUpdates = new Map<string, {
+		siteId: IdOfSite;
+		visitorId: string;
+		firstSeenAt: number;
+		lastSeenAt: number;
+		identifiedUserId?: string;
+		traits?: Record<string, string | number | boolean | null>;
+	}>();
+	const sessionUpdates = new Map<string, {
+		siteId: IdOfSite;
+		sessionId: string;
+		visitorId: string;
+		firstSeenAt: number;
+		lastSeenAt: number;
+		entryPath?: string;
+		exitPath?: string;
+		referrer?: string;
+		device?: string;
+		browser?: string;
+		os?: string;
+		country?: string;
+		utmSource?: string;
+		utmMedium?: string;
+		utmCampaign?: string;
+		identifiedUserId?: string;
+		pageviewCount: number;
+		sessionTimeoutMs: number;
+	}>();
+	const sitesCache = new Map<IdOfSite, any>();
+
+	const validEvents = [];
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregatedAt !== null) {
 			skipped += 1;
 			continue;
 		}
+		validEvents.push(event);
+
+		let site = sitesCache.get(event.siteId);
+		if (!site) {
+			site = await ctx.db.get(event.siteId);
+			if (!site) continue; // Should not happen
+			sitesCache.set(event.siteId, site);
+		}
+
+		// Group visitor updates
+		const vKey = `${event.siteId}|${event.visitorId}`;
+		const vUpdate = visitorUpdates.get(vKey) ?? {
+			siteId: event.siteId,
+			visitorId: event.visitorId,
+			firstSeenAt: event.occurredAt,
+			lastSeenAt: event.occurredAt,
+		};
+		vUpdate.firstSeenAt = Math.min(vUpdate.firstSeenAt, event.occurredAt);
+		vUpdate.lastSeenAt = Math.max(vUpdate.lastSeenAt, event.occurredAt);
+		vUpdate.identifiedUserId = event.identifiedUserId ?? vUpdate.identifiedUserId;
+		if (event.eventType === "identify") {
+			vUpdate.traits = event.properties ?? vUpdate.traits;
+		}
+		visitorUpdates.set(vKey, vUpdate);
+
+		// Group session updates
+		const sKey = `${event.siteId}|${event.sessionId}`;
+		const sUpdate = sessionUpdates.get(sKey) ?? {
+			siteId: event.siteId,
+			sessionId: event.sessionId,
+			visitorId: event.visitorId,
+			firstSeenAt: event.occurredAt,
+			lastSeenAt: event.occurredAt,
+			device: event.device,
+			browser: event.browser,
+			os: event.os,
+			country: event.country,
+			utmSource: event.utmSource,
+			utmMedium: event.utmMedium,
+			utmCampaign: event.utmCampaign,
+			pageviewCount: 0,
+			sessionTimeoutMs: site.settings.sessionTimeoutMs,
+			entryPath: undefined as string | undefined,
+			exitPath: undefined as string | undefined,
+			referrer: undefined as string | undefined,
+			identifiedUserId: undefined as string | undefined,
+		};
+		if (event.occurredAt <= sUpdate.firstSeenAt) {
+			sUpdate.firstSeenAt = event.occurredAt;
+			sUpdate.entryPath = event.path ?? sUpdate.entryPath;
+			sUpdate.referrer = event.referrer ?? sUpdate.referrer;
+		}
+		if (event.occurredAt >= sUpdate.lastSeenAt) {
+			sUpdate.lastSeenAt = event.occurredAt;
+			sUpdate.exitPath = event.path ?? sUpdate.exitPath;
+		}
+		sUpdate.identifiedUserId = event.identifiedUserId ?? sUpdate.identifiedUserId;
+		if (event.eventType === "pageview") {
+			sUpdate.pageviewCount += 1;
+		}
+		sessionUpdates.set(sKey, sUpdate);
+	}
+
+	const visitorsCreated = new Map<string, boolean>();
+	const sessionsCreated = new Map<string, boolean>();
+
+	// Apply batched visitor updates
+	for (const [vKey, update] of visitorUpdates.entries()) {
+		const result = await upsertVisitorRecord(ctx, update);
+		visitorsCreated.set(vKey, result.created);
+	}
+
+	// Apply batched session updates
+	for (const [sKey, update] of sessionUpdates.entries()) {
+		const result = await upsertSessionRecord(ctx, update);
+		sessionsCreated.set(sKey, result.created);
+	}
+
+	const visitorHasRollup = new Set<string>();
+	const sessionHasRollup = new Set<string>();
+
+	for (const event of validEvents) {
 		try {
-			const site = await ctx.db.get(event.siteId);
-			if (!site) {
-				throw new Error("Site not found");
-			}
-			await upsertVisitorRecord(ctx, {
-				siteId: event.siteId,
-				visitorId: event.visitorId,
-				seenAt: event.occurredAt,
-				identifiedUserId: event.identifiedUserId,
-				traits:
-					event.eventType === "identify" ? event.properties : undefined,
-			});
-			await upsertSessionRecord(ctx, {
-				siteId: event.siteId,
-				sessionId: event.sessionId,
-				visitorId: event.visitorId,
-				occurredAt: event.occurredAt,
-				path: event.path,
-				referrer: event.referrer,
-				device: event.device,
-				browser: event.browser,
-				os: event.os,
-				country: event.country,
-				utmSource: event.utmSource,
-				utmMedium: event.utmMedium,
-				utmCampaign: event.utmCampaign,
-				identifiedUserId: event.identifiedUserId,
-				eventType: event.eventType,
-				sessionTimeoutMs: site.settings.sessionTimeoutMs,
-			});
+			const vKey = `${event.siteId}|${event.visitorId}`;
+			const sKey = `${event.siteId}|${event.sessionId}`;
+
+			const isNewVisitor = visitorsCreated.get(vKey) && !visitorHasRollup.has(vKey);
+			const isNewSession = sessionsCreated.get(sKey) && !sessionHasRollup.has(sKey);
+
+			if (isNewVisitor) visitorHasRollup.add(vKey);
+			if (isNewSession) sessionHasRollup.add(sKey);
+
 			accumulateRollups(rollupDeltas, {
 				siteId: event.siteId,
 				occurredAt: event.occurredAt,
@@ -210,6 +302,8 @@ export async function aggregateEventsByIds(
 				utmMedium: event.utmMedium,
 				utmCampaign: event.utmCampaign,
 				receivedAt: now,
+				isNewVisitor: !!isNewVisitor,
+				isNewSession: !!isNewSession,
 			});
 			await ctx.db.patch(event._id, {
 				aggregatedAt: now,
@@ -219,6 +313,7 @@ export async function aggregateEventsByIds(
 			failed += 1;
 		}
 	}
+
 	await flushRollups(ctx, rollupDeltas);
 
 	return { aggregated, skipped, failed };
@@ -228,7 +323,8 @@ export const upsertVisitor = internalMutation({
 	args: {
 		siteId: v.id("sites"),
 		visitorId: v.string(),
-		seenAt: v.number(),
+		firstSeenAt: v.number(),
+		lastSeenAt: v.number(),
 		identifiedUserId: v.optional(v.string()),
 		traits: propertiesValidator,
 	},
@@ -245,7 +341,8 @@ export async function upsertVisitorRecord(
 	args: {
 		siteId: IdOfSite;
 		visitorId: string;
-		seenAt: number;
+		firstSeenAt: number;
+		lastSeenAt: number;
 		identifiedUserId?: string;
 		traits?: Record<string, string | number | boolean | null>;
 	},
@@ -257,8 +354,8 @@ export async function upsertVisitorRecord(
 		)
 		.unique();
 	if (existing) {
-		const firstSeenAt = Math.min(existing.firstSeenAt, args.seenAt);
-		const lastSeenAt = Math.max(existing.lastSeenAt, args.seenAt);
+		const firstSeenAt = Math.min(existing.firstSeenAt, args.firstSeenAt);
+		const lastSeenAt = Math.max(existing.lastSeenAt, args.lastSeenAt);
 		await ctx.db.patch(existing._id, {
 			firstSeenAt,
 			lastSeenAt,
@@ -271,8 +368,8 @@ export async function upsertVisitorRecord(
 	await ctx.db.insert("visitors", {
 		siteId: args.siteId,
 		visitorId: args.visitorId,
-		firstSeenAt: args.seenAt,
-		lastSeenAt: args.seenAt,
+		firstSeenAt: args.firstSeenAt,
+		lastSeenAt: args.lastSeenAt,
 		identifiedUserId: args.identifiedUserId,
 		traits: args.traits,
 	});
@@ -284,8 +381,10 @@ export const upsertSession = internalMutation({
 		siteId: v.id("sites"),
 		sessionId: v.string(),
 		visitorId: v.string(),
-		occurredAt: v.number(),
-		path: v.optional(v.string()),
+		firstSeenAt: v.number(),
+		lastSeenAt: v.number(),
+		entryPath: v.optional(v.string()),
+		exitPath: v.optional(v.string()),
 		referrer: v.optional(v.string()),
 		device: v.optional(v.string()),
 		browser: v.optional(v.string()),
@@ -295,11 +394,7 @@ export const upsertSession = internalMutation({
 		utmMedium: v.optional(v.string()),
 		utmCampaign: v.optional(v.string()),
 		identifiedUserId: v.optional(v.string()),
-		eventType: v.union(
-			v.literal("pageview"),
-			v.literal("track"),
-			v.literal("identify"),
-		),
+		pageviewCount: v.number(),
 		sessionTimeoutMs: v.number(),
 	},
 	returns: v.object({
@@ -316,8 +411,10 @@ export async function upsertSessionRecord(
 		siteId: IdOfSite;
 		sessionId: string;
 		visitorId: string;
-		occurredAt: number;
-		path?: string;
+		firstSeenAt: number;
+		lastSeenAt: number;
+		entryPath?: string;
+		exitPath?: string;
 		referrer?: string;
 		device?: string;
 		browser?: string;
@@ -327,7 +424,7 @@ export async function upsertSessionRecord(
 		utmMedium?: string;
 		utmCampaign?: string;
 		identifiedUserId?: string;
-		eventType: "pageview" | "track" | "identify";
+		pageviewCount: number;
 		sessionTimeoutMs: number;
 	},
 ) {
@@ -338,19 +435,18 @@ export async function upsertSessionRecord(
 		)
 		.order("desc")
 		.first();
-	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
 	const isNewSession =
 		!existing ||
-		args.occurredAt - existing.lastSeenAt > args.sessionTimeoutMs;
+		args.firstSeenAt - existing.lastSeenAt > args.sessionTimeoutMs;
 	if (isNewSession) {
 		await ctx.db.insert("sessions", {
 			siteId: args.siteId,
 			visitorId: args.visitorId,
 			sessionId: args.sessionId,
-			startedAt: args.occurredAt,
-			lastSeenAt: args.occurredAt,
-			entryPath: args.path,
-			exitPath: args.path,
+			startedAt: args.firstSeenAt,
+			lastSeenAt: args.lastSeenAt,
+			entryPath: args.entryPath,
+			exitPath: args.exitPath,
 			referrer: args.referrer,
 			device: args.device,
 			browser: args.browser,
@@ -360,25 +456,25 @@ export async function upsertSessionRecord(
 			utmMedium: args.utmMedium,
 			utmCampaign: args.utmCampaign,
 			identifiedUserId: args.identifiedUserId,
-			pageviewCount: pageviewIncrement,
+			pageviewCount: args.pageviewCount,
 		});
 		return { created: true };
 	}
 
-	const startedAt = Math.min(existing.startedAt, args.occurredAt);
-	const lastSeenAt = Math.max(existing.lastSeenAt, args.occurredAt);
-	const nextPageviewCount = existing.pageviewCount + pageviewIncrement;
+	const startedAt = Math.min(existing.startedAt, args.firstSeenAt);
+	const lastSeenAt = Math.max(existing.lastSeenAt, args.lastSeenAt);
+	const nextPageviewCount = existing.pageviewCount + args.pageviewCount;
 	await ctx.db.patch(existing._id, {
 		visitorId: args.visitorId,
 		startedAt,
 		lastSeenAt,
 		entryPath:
-			args.occurredAt < existing.startedAt && args.path
-				? args.path
+			args.firstSeenAt < existing.startedAt && args.entryPath
+				? args.entryPath
 				: existing.entryPath,
 		exitPath:
-			args.path && args.occurredAt >= existing.lastSeenAt
-				? args.path
+			args.exitPath && args.lastSeenAt >= existing.lastSeenAt
+				? args.exitPath
 				: existing.exitPath,
 		referrer: existing.referrer ?? args.referrer,
 		device: existing.device ?? args.device,
@@ -409,6 +505,8 @@ type RollupInput = {
 	utmMedium?: string;
 	utmCampaign?: string;
 	receivedAt: number;
+	isNewVisitor: boolean;
+	isNewSession: boolean;
 };
 
 type RollupDelta = {
@@ -419,6 +517,8 @@ type RollupDelta = {
 	key: string;
 	count: number;
 	pageviewCount: number;
+	visitorCount: number;
+	sessionCount: number;
 	updatedAt: number;
 };
 
@@ -444,6 +544,8 @@ export function accumulateRollups(
 			: null,
 	].filter((item): item is { dimension: string; key: string } => item !== null);
 	const pageviewIncrement = args.eventType === "pageview" ? 1 : 0;
+	const visitorIncrement = args.isNewVisitor ? 1 : 0;
+	const sessionIncrement = args.isNewSession ? 1 : 0;
 	for (const item of dimensions) {
 		mergeRollupDelta(deltas, {
 			siteId: args.siteId,
@@ -453,6 +555,8 @@ export function accumulateRollups(
 			key: item.key,
 			count: 1,
 			pageviewCount: pageviewIncrement,
+			visitorCount: visitorIncrement,
+			sessionCount: sessionIncrement,
 			updatedAt: args.receivedAt,
 		});
 		mergeRollupDelta(deltas, {
@@ -463,6 +567,8 @@ export function accumulateRollups(
 			key: item.key,
 			count: 1,
 			pageviewCount: pageviewIncrement,
+			visitorCount: visitorIncrement,
+			sessionCount: sessionIncrement,
 			updatedAt: args.receivedAt,
 		});
 	}
@@ -486,6 +592,8 @@ export function mergeRollupDelta(
 	}
 	existing.count += args.count;
 	existing.pageviewCount += args.pageviewCount;
+	existing.visitorCount += args.visitorCount;
+	existing.sessionCount += args.sessionCount;
 	existing.updatedAt = Math.max(existing.updatedAt, args.updatedAt);
 }
 
@@ -514,6 +622,8 @@ export async function flushRollups(
 				key: args.key,
 				count: args.count,
 				pageviewCount: args.pageviewCount,
+				visitorCount: args.visitorCount,
+				sessionCount: args.sessionCount,
 				bounceCount: 0,
 				durationMs: 0,
 				updatedAt: args.updatedAt,
@@ -524,6 +634,8 @@ export async function flushRollups(
 		await ctx.db.patch(existing._id, {
 			count: existing.count + args.count,
 			pageviewCount: existing.pageviewCount + args.pageviewCount,
+			visitorCount: (existing.visitorCount ?? 0) + args.visitorCount,
+			sessionCount: (existing.sessionCount ?? 0) + args.sessionCount,
 			updatedAt: Math.max(existing.updatedAt, args.updatedAt),
 		});
 	}

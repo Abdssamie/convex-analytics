@@ -188,24 +188,61 @@ export async function resolveSite(
 	throw new Error("siteId or slug is required");
 }
 
+export async function manualPaginate<T extends { _id: any }>(
+	query: any,
+	paginationOpts: { numItems: number; cursor: string | null },
+): Promise<{ page: T[]; isDone: boolean; continueCursor: string | null }> {
+	let q = query;
+	if (paginationOpts.cursor) {
+		q = q.startAfter(paginationOpts.cursor);
+	}
+	// Fetch one extra item to determine if there's a next page
+	const page: T[] = await q.take(paginationOpts.numItems + 1);
+	const isDone = page.length <= paginationOpts.numItems;
+	const results = isDone ? page : page.slice(0, paginationOpts.numItems);
+	const continueCursor = isDone ? null : results[results.length - 1]._id;
+
+	return {
+		page: results,
+		isDone,
+		continueCursor,
+	};
+}
+
 export function sumRollups(
 	rows: Array<{
 		count: number;
 		pageviewCount: number;
+		visitorCount?: number;
+		sessionCount?: number;
 		bounceCount: number;
 		durationMs: number;
 	}>,
 ) {
 	return rows.reduce(
-		(sum, row) => ({
+		(
+			sum: {
+				count: number;
+				pageviewCount: number;
+				visitorCount: number;
+				sessionCount: number;
+				bounceCount: number;
+				durationMs: number;
+			},
+			row,
+		) => ({
 			count: sum.count + row.count,
 			pageviewCount: sum.pageviewCount + row.pageviewCount,
+			visitorCount: sum.visitorCount + (row.visitorCount ?? 0),
+			sessionCount: sum.sessionCount + (row.sessionCount ?? 0),
 			bounceCount: sum.bounceCount + row.bounceCount,
 			durationMs: sum.durationMs + row.durationMs,
 		}),
 		{
 			count: 0,
 			pageviewCount: 0,
+			visitorCount: 0,
+			sessionCount: 0,
 			bounceCount: 0,
 			durationMs: 0,
 		},

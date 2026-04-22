@@ -116,6 +116,8 @@ export default defineSchema({
 		key: v.string(),
 		count: v.number(),
 		pageviewCount: v.number(),
+		visitorCount: v.number(),
+		sessionCount: v.number(),
 		bounceCount: v.number(),
 		durationMs: v.number(),
 		updatedAt: v.number(),
