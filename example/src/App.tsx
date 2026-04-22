@@ -79,8 +79,12 @@ function App() {
         </div>
         {site ? (
           <AnalyticsDashboard siteId={site._id} api={api.example} />
+        ) : site === null ? (
+          <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
+            Run <code>npx convex run example:setupDefaultSite</code> once.
+          </div>
         ) : (
-          <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+          <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
             Loading site configuration...
           </div>
         )}
@@ -93,6 +97,11 @@ function App() {
       <nav style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
         <button onClick={() => navigate("/dashboard")}>View Analytics Dashboard →</button>
       </nav>
+      {site === null ? (
+        <p className="status">
+          Setup missing. Run <code>npx convex run example:setupDefaultSite</code> once.
+        </p>
+      ) : null}
       <section className="hero">
         <p className="eyebrow">Tracked Example App</p>
         <h1>Launch a tiny product workspace.</h1>

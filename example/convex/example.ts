@@ -41,6 +41,20 @@ export const {
   auth: async () => {},
 });
 
+export const setupDefaultSite = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.runMutation(components.convexAnalytics.sites.createSite, {
+      slug: "default",
+      name: "Default site",
+      writeKeyHash: await hashWriteKey(
+        process.env.ANALYTICS_WRITE_KEY ?? "write_demo_local",
+      ),
+      allowedOrigins: [],
+    });
+  },
+});
+
 export const ingestExampleBatch = mutation({
   args: {
     writeKey: v.string(),

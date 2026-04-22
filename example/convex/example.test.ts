@@ -3,6 +3,20 @@ import { initConvexTest } from "./setup.test";
 import { api } from "./_generated/api";
 
 describe("example", () => {
+  test("bootstraps default site once", async () => {
+    const t = initConvexTest();
+
+    const siteId = await t.mutation(api.example.setupDefaultSite, {});
+    expect(siteId).toBeDefined();
+
+    const site = await t.query(api.example.getSiteBySlug, {
+      slug: "default",
+    });
+    expect(site?._id).toBe(siteId);
+    expect(site?.name).toBe("Default site");
+    expect(site?.writeKeyHash).not.toBe("write_demo_local");
+  });
+
   test("creates a site and ingests events through app wrappers", async () => {
     vi.useFakeTimers();
     try {

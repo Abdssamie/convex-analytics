@@ -96,6 +96,26 @@ export const { createSite } = exposeAdminApi(components.convexAnalytics, {
 Run `createSite(...)` one time per tracked site. After that, ingest route only
 accepts events for already-created sites.
 
+For quick example/demo setup, expose tiny bootstrap mutation and run it once:
+
+```ts
+export const setupDefaultSite = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.runMutation(components.convexAnalytics.sites.createSite, {
+      slug: "default",
+      name: "Default site",
+      writeKeyHash: await hashWriteKey(process.env.ANALYTICS_WRITE_KEY!),
+      allowedOrigins: [],
+    });
+  },
+});
+```
+
+```sh
+npx convex run example:setupDefaultSite
+```
+
 ```ts
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api";
