@@ -42,39 +42,16 @@ async function countSiteRows(
 			.query("sessions")
 			.withIndex("by_siteId_and_startedAt", (q) => q.eq("siteId", siteId))
 			.take(500);
-		const pendingEvents = await ctx.db
+		const events = await ctx.db
 			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q
-					.eq("siteId", siteId)
-					.eq("aggregationStatus", "pending")
-					.lte("occurredAt", now),
-			)
-			.take(500);
-		const doneEvents = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q
-					.eq("siteId", siteId)
-					.eq("aggregationStatus", "done")
-					.lte("occurredAt", now),
-			)
-			.take(500);
-		const failedEvents = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q
-					.eq("siteId", siteId)
-					.eq("aggregationStatus", "failed")
-					.lte("occurredAt", now),
+			.withIndex("by_siteId_and_occurredAt", (q) =>
+				q.eq("siteId", siteId).lte("occurredAt", now),
 			)
 			.take(500);
 		return {
 			visitors,
 			sessions,
-			pendingEvents,
-			doneEvents,
-			failedEvents,
+			events,
 		};
 	});
 }
@@ -158,8 +135,7 @@ async function insertPendingPageviewEvents(
 				title: index % 2 === 0 ? "Home" : "Pricing",
 				source: "web",
 				utmCampaign: "load-test",
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 			eventIds.push(eventId);
 		}
@@ -196,8 +172,7 @@ async function insertPendingPageviewEvent(
 			source: "web",
 			utmSource: args.utmSource,
 			utmCampaign: args.utmCampaign,
-			aggregationStatus: "pending",
-			aggregationAttempts: 0,
+			aggregatedAt: null,
 		});
 	});
 }
@@ -261,20 +236,17 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 					path: "/",
 					title: "Home",
 					occurredAt: base,
-					eventId: "event-a1",
 				},
 				{
 					type: "track",
 					name: "signup_click",
 					occurredAt: base + 60_000,
-					eventId: "event-a2",
 				},
 				{
 					type: "identify",
 					occurredAt: base + 120_000,
 					userId: "user-1",
 					properties: { plan: "pro", company: "Acme" },
-					eventId: "event-a3",
 				},
 			],
 		});
@@ -294,20 +266,17 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 					title: "Pricing",
 					referrer: "https://google.com",
 					occurredAt: base + 5 * 60_000,
-					eventId: "event-b1",
 				},
 				{
 					type: "pageview",
 					path: "/checkout",
 					title: "Checkout",
 					occurredAt: base + 6 * 60_000,
-					eventId: "event-b2",
 				},
 				{
 					type: "track",
 					name: "purchase",
 					occurredAt: base + 7 * 60_000,
-					eventId: "event-b3",
 				},
 			],
 		});
@@ -326,13 +295,11 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 					path: "/docs",
 					title: "Docs",
 					occurredAt: base + 2 * hourMs,
-					eventId: "event-c1",
 				},
 				{
 					type: "track",
 					name: "search",
 					occurredAt: base + 2 * hourMs + 30_000,
-					eventId: "event-c2",
 				},
 			],
 		});
@@ -340,13 +307,14 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		const before = await countSiteRows(t, siteId, base + 3 * hourMs);
 		expect(before.visitors).toHaveLength(0);
 		expect(before.sessions).toHaveLength(0);
-		expect(before.pendingEvents).toHaveLength(8);
+		expect(before.events).toHaveLength(8);
+		expect(before.events.every((row) => row.aggregatedAt === null)).toBe(true);
 
 		await t.finishAllScheduledFunctions(() => vi.runAllTimers());
 
 		const after = await countSiteRows(t, siteId, base + 3 * hourMs);
-		expect(after.pendingEvents).toHaveLength(0);
-		expect(after.doneEvents).toHaveLength(8);
+		expect(after.events).toHaveLength(8);
+		expect(after.events.every((row) => row.aggregatedAt !== null)).toBe(true);
 		expect(after.visitors).toHaveLength(2);
 		expect(after.sessions).toHaveLength(3);
 
@@ -363,29 +331,26 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			visitorId: "visitor-1",
 			entryPath: "/",
 			exitPath: "/",
-			eventCount: 3,
 			pageviewCount: 1,
 			identifiedUserId: "user-1",
-			bounce: true,
-			durationMs: 120_000,
+			startedAt: base,
+			lastSeenAt: base + 120_000,
 		});
 		expect(sessions.get("session-b")).toMatchObject({
 			visitorId: "visitor-2",
 			entryPath: "/pricing",
 			exitPath: "/checkout",
-			eventCount: 3,
 			pageviewCount: 2,
-			bounce: false,
-			durationMs: 120_000,
+			startedAt: base + 5 * 60_000,
+			lastSeenAt: base + 7 * 60_000,
 		});
 		expect(sessions.get("session-c")).toMatchObject({
 			visitorId: "visitor-1",
 			entryPath: "/docs",
 			exitPath: "/docs",
-			eventCount: 2,
 			pageviewCount: 1,
-			bounce: true,
-			durationMs: 30_000,
+			startedAt: base + 2 * hourMs,
+			lastSeenAt: base + 2 * hourMs + 30_000,
 		});
 
 		const overview = await t.query(api.analytics.getOverview, {
@@ -451,21 +416,9 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(rawEvents.isDone).toBe(true);
 		expect(
 			rawEvents.page.every(
-				(row: { aggregationStatus?: string }) => row.aggregationStatus === "done",
+				(row: { aggregatedAt?: number | null }) => row.aggregatedAt !== null,
 			),
-		).toBe(
-			true,
-		);
-		expect(
-			rawEvents.page.filter(
-				(row: { contributesVisitor?: boolean }) => row.contributesVisitor,
-			),
-		).toHaveLength(2);
-		expect(
-			rawEvents.page.filter(
-				(row: { contributesSession?: boolean }) => row.contributesSession,
-			),
-		).toHaveLength(3);
+		).toBe(true);
 
 		const rawEventsPageOne = await t.query(api.analytics.listRawEvents, {
 			siteId,
@@ -804,8 +757,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				eventName: "pageview",
 				path: "/",
 				title: "Home",
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 			const second = await ctx.db.insert("events", {
 				siteId,
@@ -817,8 +769,7 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 				eventName: "pageview",
 				path: "/pricing",
 				title: "Pricing",
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 			return [first, second];
 		});
@@ -845,14 +796,12 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 			entryPath: "/pricing",
 			exitPath: "/pricing",
 			pageviewCount: 1,
-			eventCount: 1,
 		});
 		expect(sessions.page[1]).toMatchObject({
 			startedAt: now,
 			entryPath: "/",
 			exitPath: "/",
 			pageviewCount: 1,
-			eventCount: 1,
 		});
 	});
 
@@ -1127,95 +1076,56 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(eventRowsAfter).toHaveLength(3);
 	});
 
-	test("failed aggregations retry with backoff, then stay failed until manual requeue", async () => {
-		vi.useFakeTimers();
-		try {
-			const { t, siteId } = await createSite();
-			const now = Date.UTC(2026, 0, 12, 12, 0, 0);
-			const eventId = await t.run(async (ctx) => {
-				const orphanSiteId = await ctx.db.insert("sites", {
-					slug: "orphan-site",
-					name: "Orphan",
-					status: "active",
-					writeKeyHash: "orphan",
-					allowedOrigins: [],
-						settings: {
-							sessionTimeoutMs: 30 * 60 * 1000,
-							retentionDays: 90,
-							rawEventRetentionDays: 90,
-							hourlyRollupRetentionDays: 90,
-							dedupeRetentionMs: 24 * 60 * 60 * 1000,
-							rollupShardCount: 1,
-						},
-					createdAt: now,
-					updatedAt: now,
-				});
-				const id = await ctx.db.insert("events", {
-					siteId: orphanSiteId,
-					receivedAt: now,
-					occurredAt: now,
-					visitorId: "visitor-1",
-					sessionId: "session-1",
-					eventType: "pageview",
-					eventName: "pageview",
-					path: "/broken",
-					aggregationStatus: "pending",
-					aggregationAttempts: 0,
-				});
-				await ctx.db.delete(orphanSiteId);
-				return id;
+	test("failed aggregations mark event failed once without auto requeue", async () => {
+		const { t } = await createSite();
+		const now = Date.UTC(2026, 0, 12, 12, 0, 0);
+		const eventId = await t.run(async (ctx) => {
+			const orphanSiteId = await ctx.db.insert("sites", {
+				slug: "orphan-site",
+				name: "Orphan",
+				status: "active",
+				writeKeyHash: "orphan",
+				allowedOrigins: [],
+				settings: {
+					sessionTimeoutMs: 30 * 60 * 1000,
+					retentionDays: 90,
+					rawEventRetentionDays: 90,
+					hourlyRollupRetentionDays: 90,
+					rollupShardCount: 1,
+				},
+				createdAt: now,
+				updatedAt: now,
 			});
+			const id = await ctx.db.insert("events", {
+				siteId: orphanSiteId,
+				receivedAt: now,
+				occurredAt: now,
+				visitorId: "visitor-1",
+				sessionId: "session-1",
+				eventType: "pageview",
+				eventName: "pageview",
+				path: "/broken",
+				aggregatedAt: null,
+			});
+			await ctx.db.delete(orphanSiteId);
+			return id;
+		});
 
-			await t.mutation(internal.ingest.aggregateEventBatch, {
-				eventIds: [eventId],
-			});
-			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+		const result = await t.mutation(internal.ingest.aggregateEventBatch, {
+			eventIds: [eventId],
+		});
+		expect(result).toEqual({
+			aggregated: 0,
+			skipped: 0,
+			failed: 1,
+		});
 
-			const failedAfterRetries = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(failedAfterRetries).toMatchObject({
-				aggregationStatus: "failed",
-				aggregationAttempts: 3,
-				aggregationError: "Site not found",
-			});
-
-			await t.run(async (ctx) => {
-				await ctx.db.patch(eventId, {
-					siteId,
-					aggregationStatus: "failed",
-				});
-			});
-
-			const requeue = await t.mutation(api.ingest.retryFailedEvents, {
-				siteId,
-				limit: 10,
-			});
-			expect(requeue).toEqual({ requeued: 1, hasMore: false });
-			const requeuedEvent = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(requeuedEvent).toMatchObject({
-				siteId,
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
-				aggregationError: "",
-			});
-
-			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
-
-			const recovered = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(recovered).toMatchObject({
-				siteId,
-				aggregationStatus: "done",
-				aggregationAttempts: 1,
-				aggregationError: "",
-			});
-		} finally {
-			vi.useRealTimers();
-		}
+		const failedEvent = await t.run(async (ctx) => {
+			return await ctx.db.get(eventId);
+		});
+		expect(failedEvent).toMatchObject({
+			aggregatedAt: null,
+		});
 	});
 
 	test("event property breakdown groups custom track events by requested property", async () => {
@@ -1236,28 +1146,24 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 						type: "track",
 						name: "plan_selected",
 						occurredAt: base,
-						eventId: "plan-1",
 						properties: { plan: "pro", billingCycle: "monthly" },
 					},
 					{
 						type: "track",
 						name: "plan_selected",
 						occurredAt: base + 1_000,
-						eventId: "plan-2",
 						properties: { plan: "starter", billingCycle: "monthly" },
 					},
 					{
 						type: "track",
 						name: "plan_selected",
 						occurredAt: base + 2_000,
-						eventId: "plan-3",
 						properties: { plan: "pro", billingCycle: "yearly" },
 					},
 					{
 						type: "track",
 						name: "checkout_started",
 						occurredAt: base + 3_000,
-						eventId: "checkout-1",
 						properties: { plan: "enterprise" },
 					},
 				],

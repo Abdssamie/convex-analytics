@@ -1,5 +1,5 @@
 import { components } from "./_generated/api.js";
-import { internalAction, internalMutation } from "./_generated/server.js";
+import { internalAction } from "./_generated/server.js";
 import { v } from "convex/values";
 
 export const site = internalAction({
@@ -13,19 +13,6 @@ export const site = internalAction({
   handler: async (ctx, args) => {
     return await ctx.runAction(
       components.convexAnalytics.maintenance.cleanupSite,
-      args,
-    );
-  },
-});
-
-export const dedupes = internalMutation({
-  args: {
-    now: v.optional(v.number()),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(
-      components.convexAnalytics.maintenance.pruneExpired,
       args,
     );
   },

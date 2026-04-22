@@ -11,22 +11,6 @@ export type ActionCtx = Pick<
 	GenericActionCtx<GenericDataModel>,
 	"runQuery" | "runMutation" | "runAction"
 >;
-export type SiteConfig = {
-	slug: string;
-	name: string;
-	writeKey?: string;
-	writeKeyHash?: string;
-	allowedOrigins?: string[];
-	sessionTimeoutMs?: number;
-	retentionDays?: number;
-	rawEventRetentionDays?: number;
-	hourlyRollupRetentionDays?: number;
-	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
-	rollupShardCount?: number;
-	allowedPropertyKeys?: string[];
-	deniedPropertyKeys?: string[];
-};
 export type AnalyticsEvent =
 	| {
 			type: "pageview";
@@ -34,7 +18,6 @@ export type AnalyticsEvent =
 			title?: string;
 			referrer?: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  }
 	| {
@@ -42,14 +25,12 @@ export type AnalyticsEvent =
 			name: string;
 			path?: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  }
 	| {
 			type: "identify";
 			userId: string;
 			properties?: AnalyticsProperties;
-			eventId?: string;
 			occurredAt?: number;
 	  };
 export type AnalyticsProperties = Record<
@@ -75,5 +56,4 @@ export type IngestEventInput = {
 	referrer?: string;
 	properties?: AnalyticsProperties;
 	userId?: string;
-	eventId?: string;
 };

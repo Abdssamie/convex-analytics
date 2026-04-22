@@ -23,7 +23,6 @@ export const eventInputValidator = v.object({
 	referrer: v.optional(v.string()),
 	properties: propertiesValidator,
 	userId: v.optional(v.string()),
-	eventId: v.optional(v.string()),
 });
 export const contextValidator = v.optional(
 	v.object({
@@ -51,7 +50,6 @@ export const siteValidator = v.object({
 		rawEventRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
-		dedupeRetentionMs: v.optional(v.number()),
 		rollupShardCount: v.optional(v.number()),
 		allowedPropertyKeys: v.optional(v.array(v.string())),
 		deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -82,15 +80,7 @@ export const eventValidator = v.object({
 	utmCampaign: v.optional(v.string()),
 	properties: propertiesValidator,
 	identifiedUserId: v.optional(v.string()),
-	dedupeKey: v.optional(v.string()),
-	contributesVisitor: v.optional(v.boolean()),
-	contributesSession: v.optional(v.boolean()),
-	aggregationStatus: v.optional(
-		v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
-	),
-	aggregationAttempts: v.optional(v.number()),
-	aggregationError: v.optional(v.string()),
-	aggregatedAt: v.optional(v.number()),
+	aggregatedAt: v.optional(v.union(v.number(), v.null())),
 });
 export const sessionValidator = v.object({
 	_id: v.id("sessions"),
@@ -111,10 +101,7 @@ export const sessionValidator = v.object({
 	os: v.optional(v.string()),
 	country: v.optional(v.string()),
 	identifiedUserId: v.optional(v.string()),
-	eventCount: v.number(),
 	pageviewCount: v.number(),
-	durationMs: v.number(),
-	bounce: v.boolean(),
 });
 export const topRowValidator = v.object({
 	key: v.string(),
@@ -149,7 +136,6 @@ export type SiteSettingsArgs = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
 	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];
@@ -161,7 +147,6 @@ export type SiteSettings = {
 	rawEventRetentionDays?: number;
 	hourlyRollupRetentionDays?: number;
 	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
 	rollupShardCount?: number;
 	allowedPropertyKeys?: string[];
 	deniedPropertyKeys?: string[];

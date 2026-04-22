@@ -25,17 +25,15 @@ The component owns its own Convex tables:
 - `sites`: one tracked site/app per write key
 - `visitors`: durable anonymous visitor records
 - `sessions`: session windows and coarse device/source summary
-- `events`: append-only raw events with pending/done aggregation state
+- `events`: append-only raw events with lightweight aggregation marker
 - `rollupShards`: sharded hourly/daily report counters
-- `ingestDedupes`: short-lived retry/idempotency cache
 
 ```mermaid
 flowchart LR
     Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
     Http --> Ingest["ingestBatch\nappend-only raw event insert"]
     Ingest --> Events[("events")]
-    Ingest --> Dedupe[("ingestDedupes")]
-    Ingest --> Worker["aggregateEventBatch / aggregatePending"]
+    Ingest --> Worker["aggregateEventBatch"]
     Worker --> Visitors[("visitors")]
     Worker --> Sessions[("sessions")]
     Worker --> Rollups[("rollupShards\nhourly + daily shards")]
@@ -50,15 +48,15 @@ Why `sites` exists: one Convex deployment can track multiple sites or apps.
 For the common one-site case, create one site named `default` and ignore the
 multi-site parts until needed.
 
-Browser traffic should use the HTTP ingest route. Do not send every browser
-event through public Convex mutations. The SDK batches events and the HTTP route
-hashes the write key before calling the component.
+Browser traffic should use HTTP ingest route. Do not send every browser event
+through public Convex mutations. SDK batches events and HTTP route hashes write
+key before calling component.
 
 Ingest and reporting are split on purpose. `ingestBatch` writes raw events
-quickly, marks them `pending`, and schedules background aggregation. The worker
-materializes visitors, sessions, and rollup shards, then marks each event
-`done`. Compaction later collapses old shard fanout back to shard `0` so
-dashboard queries stay cheap.
+quickly, leaves `aggregatedAt: null`, and schedules background aggregation. The
+worker materializes visitors, sessions, and rollup shards, then stamps
+`aggregatedAt`. Compaction later collapses old shard fanout back to shard `0`
+so dashboard queries stay cheap.
 
 Dashboard queries are range-aware:
 
@@ -80,8 +78,41 @@ app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });
 export default app;
 ```
 
-Register the HTTP ingest route in `convex/http.ts`. The route config is the
-trusted site registry. Browser callers cannot create or modify sites.
+Create site once from backend/admin code, then register HTTP ingest route in
+`convex/http.ts`. Browser callers cannot create or modify sites.
+
+```ts
+// convex/example.ts
+import { components } from "./_generated/api";
+import { exposeAdminApi } from "@Abdssamie/convex-analytics";
+
+export const { createSite } = exposeAdminApi(components.convexAnalytics, {
+  auth: async () => {},
+});
+```
+
+Run `createSite(...)` one time per tracked site. After that, ingest route only
+accepts events for already-created sites.
+
+For quick example/demo setup, expose tiny bootstrap mutation and run it once:
+
+```ts
+export const setupDefaultSite = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.runMutation(components.convexAnalytics.sites.createSite, {
+      slug: "default",
+      name: "Default site",
+      writeKeyHash: await hashWriteKey(process.env.ANALYTICS_WRITE_KEY!),
+      allowedOrigins: [],
+    });
+  },
+});
+```
+
+```sh
+npx convex run example:setupDefaultSite
+```
 
 ```ts
 import { httpRouter } from "convex/server";
@@ -92,19 +123,6 @@ const http = httpRouter();
 
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "default",
-      name: "Default site",
-      writeKey: process.env.ANALYTICS_WRITE_KEY!,
-      allowedOrigins: ["https://example.com"],
-      retentionDays: 90,
-      rawEventRetentionDays: 90,
-      hourlyRollupRetentionDays: 90,
-      // Omit dailyRollupRetentionDays to keep daily rollups indefinitely.
-      dedupeRetentionMs: 24 * 60 * 60 * 1000,
-    },
-  ],
 });
 
 export default http;
@@ -115,14 +133,11 @@ Add default maintenance wrappers once:
 ```ts
 // convex/cleanup.ts
 import { components } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import {
-  runCleanupSite,
-  runPruneExpired,
-} from "@Abdssamie/convex-analytics";
+import { runCleanupSite } from "@Abdssamie/convex-analytics";
 
-export const site = internalMutation({
+export const site = internalAction({
   args: {
     siteId: v.optional(v.string()),
     slug: v.optional(v.string()),
@@ -132,16 +147,6 @@ export const site = internalMutation({
   },
   handler: async (ctx, args) => {
     return await runCleanupSite(ctx, components.convexAnalytics, args);
-  },
-});
-
-export const dedupes = internalMutation({
-  args: {
-    now: v.optional(v.number()),
-    limit: v.optional(v.number()),
-  },
-  handler: async (ctx, args) => {
-    return await runPruneExpired(ctx, components.convexAnalytics, args);
   },
 });
 ```
@@ -160,7 +165,6 @@ registerDefaultAnalyticsCrons(
   crons,
   {
     cleanupSite: internal.cleanup.site,
-    pruneExpired: internal.cleanup.dedupes,
   },
   {
     slug: "default",
@@ -172,31 +176,10 @@ export default crons;
 
 That is enough for normal installs.
 
-For multiple sites on the same Convex deployment, add more site configs with
-separate write keys and origins:
+For multiple sites on same Convex deployment, call `createSite(...)` once for
+each site with separate write keys and origins.
 
-```ts
-registerRoutes(http, components.convexAnalytics, {
-  path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "app",
-      name: "Product App",
-      writeKey: process.env.ANALYTICS_APP_WRITE_KEY!,
-      allowedOrigins: ["https://app.example.com"],
-    },
-    {
-      slug: "marketing",
-      name: "Marketing Site",
-      writeKey: process.env.ANALYTICS_MARKETING_WRITE_KEY!,
-      allowedOrigins: ["https://example.com"],
-    },
-  ],
-});
-```
-
-The route auto-ensures configured sites from server config during ingest. The
-component stores only `writeKeyHash`, not raw write keys.
+Component stores only `writeKeyHash`, not raw write keys.
 
 The browser write key is an ingest credential, not an admin secret. Treat it like
 a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
@@ -257,13 +240,9 @@ import { exposeAdminApi } from "@Abdssamie/convex-analytics";
 
 export const {
   createSite,
-  ensureSite,
   updateSite,
   rotateWriteKey,
-  aggregatePending,
-  retryFailedEvents,
   cleanupSite,
-  pruneExpired,
 } = exposeAdminApi(components.convexAnalytics, {
   auth: async (ctx, operation) => {
     // admin auth / site ownership check here
@@ -273,11 +252,8 @@ export const {
 
 Admin surface:
 
-- `createSite`, `ensureSite`, `updateSite`, `rotateWriteKey`
-- `aggregatePending(siteId, now?, limit?)`
-- `retryFailedEvents(siteId, limit?, runUntilComplete?)`
+- `createSite`, `updateSite`, `rotateWriteKey`
 - `cleanupSite(siteId? | slug?, now?, limit?, runUntilComplete?)`
-- `pruneExpired(now?, limit?)`
 
 Recommended dashboard shape:
 
@@ -301,7 +277,6 @@ Retention is configured per site. Defaults are cost-conscious:
 - raw `events`: 90 days
 - hourly `rollupShards`: 90 days
 - daily `rollupShards`: kept indefinitely
-- `ingestDedupes`: 24 hours from insertion
 
 `retentionDays` is shared default for raw events and hourly rollups. Override
 specific fields when needed:
@@ -309,17 +284,6 @@ specific fields when needed:
 ```ts
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "default",
-      name: "Default site",
-      writeKey: process.env.ANALYTICS_WRITE_KEY!,
-      rawEventRetentionDays: 30,
-      hourlyRollupRetentionDays: 14,
-      dailyRollupRetentionDays: 730,
-      dedupeRetentionMs: 6 * 60 * 60 * 1000,
-    },
-  ],
 });
 ```
 
@@ -346,16 +310,6 @@ export const site = internalMutation({
     });
   },
 });
-
-export const dedupes = internalMutation({
-  args: { limit: v.optional(v.number()) },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(
-      components.convexAnalytics.maintenance.pruneExpired,
-      args,
-    );
-  },
-});
 ```
 
 Then schedule them:
@@ -372,13 +326,6 @@ crons.interval(
   { hours: 6 },
   internal.cleanup.site,
   { slug: "default", limit: 100 },
-);
-
-crons.interval(
-  "analytics dedupe cleanup",
-  { hours: 6 },
-  internal.cleanup.dedupes,
-  { limit: 100 },
 );
 
 export default crons;
@@ -424,12 +371,9 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Browser events are batched.
 - Raw events are slim.
 - Write keys are hashed before reaching component storage.
-- Retry dedupe prevents duplicate event inserts.
 - Ingest does not patch report counters inline.
 - Reports use sharded hourly/daily rollups for common analytics queries.
 - Old rollup shard fanout is compacted in background.
-- `aggregatePending` can repair missed pending events after deploys or failures.
-- `retryFailedEvents` can replay bounded failed batches after fixing root cause.
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.

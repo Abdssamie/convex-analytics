@@ -45,25 +45,17 @@ export function exposeAdminApi(
 ) {
 	const {
 		createSite,
-		ensureSite,
 		updateSite,
 		rotateWriteKey,
-		aggregatePending,
-		retryFailedEvents,
 		getSiteBySlug,
 		cleanupSite,
-		pruneExpired,
 	} = exposeApi(component, options);
 	return {
 		createSite,
-		ensureSite,
 		updateSite,
 		rotateWriteKey,
-		aggregatePending,
-		retryFailedEvents,
 		getSiteBySlug,
 		cleanupSite,
-		pruneExpired,
 	};
 }
 
@@ -85,7 +77,6 @@ export function exposeApi(
 				rawEventRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
 				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -102,7 +93,6 @@ export function exposeApi(
 					rawEventRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
-					dedupeRetentionMs,
 					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
@@ -116,57 +106,6 @@ export function exposeApi(
 					rawEventRetentionDays,
 					hourlyRollupRetentionDays,
 					dailyRollupRetentionDays,
-					dedupeRetentionMs,
-					rollupShardCount,
-					allowedPropertyKeys,
-					deniedPropertyKeys,
-					writeKeyHash: await hashWriteKey(writeKey),
-				});
-			},
-		}),
-		ensureSite: mutationGeneric({
-			args: {
-				slug: v.string(),
-				name: v.string(),
-				writeKey: v.string(),
-				allowedOrigins: v.optional(v.array(v.string())),
-				sessionTimeoutMs: v.optional(v.number()),
-				retentionDays: v.optional(v.number()),
-				rawEventRetentionDays: v.optional(v.number()),
-				hourlyRollupRetentionDays: v.optional(v.number()),
-				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
-				rollupShardCount: v.optional(v.number()),
-				allowedPropertyKeys: v.optional(v.array(v.string())),
-				deniedPropertyKeys: v.optional(v.array(v.string())),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, { type: "admin" });
-				const {
-					writeKey,
-					slug,
-					name,
-					allowedOrigins,
-					sessionTimeoutMs,
-					retentionDays,
-					rawEventRetentionDays,
-					hourlyRollupRetentionDays,
-					dailyRollupRetentionDays,
-					dedupeRetentionMs,
-					rollupShardCount,
-					allowedPropertyKeys,
-					deniedPropertyKeys,
-				} = args;
-				return await ctx.runMutation(component.sites.ensureSite, {
-					slug,
-					name,
-					allowedOrigins,
-					sessionTimeoutMs,
-					retentionDays,
-					rawEventRetentionDays,
-					hourlyRollupRetentionDays,
-					dailyRollupRetentionDays,
-					dedupeRetentionMs,
 					rollupShardCount,
 					allowedPropertyKeys,
 					deniedPropertyKeys,
@@ -185,7 +124,6 @@ export function exposeApi(
 				rawEventRetentionDays: v.optional(v.number()),
 				hourlyRollupRetentionDays: v.optional(v.number()),
 				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
 				rollupShardCount: v.optional(v.number()),
 				allowedPropertyKeys: v.optional(v.array(v.string())),
 				deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -212,34 +150,6 @@ export function exposeApi(
 					siteId: args.siteId,
 					writeKeyHash: await hashWriteKey(args.writeKey),
 				});
-			},
-		}),
-		aggregatePending: mutationGeneric({
-			args: {
-				siteId: v.string(),
-				now: v.optional(v.number()),
-				limit: v.optional(v.number()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, {
-					type: "admin",
-					siteId: args.siteId,
-				});
-				return await ctx.runMutation(component.ingest.aggregatePending, args);
-			},
-		}),
-		retryFailedEvents: mutationGeneric({
-			args: {
-				siteId: v.string(),
-				limit: v.optional(v.number()),
-				runUntilComplete: v.optional(v.boolean()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, {
-					type: "admin",
-					siteId: args.siteId,
-				});
-				return await ctx.runMutation(component.ingest.retryFailedEvents, args);
 			},
 		}),
 		getSiteBySlug: queryGeneric({
@@ -378,16 +288,6 @@ export function exposeApi(
 					siteId: args.siteId,
 				});
 				return await ctx.runAction(component.maintenance.cleanupSite, args);
-			},
-		}),
-		pruneExpired: mutationGeneric({
-			args: {
-				now: v.optional(v.number()),
-				limit: v.optional(v.number()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, { type: "admin" });
-				return await ctx.runMutation(component.maintenance.pruneExpired, args);
 			},
 		}),
 	};

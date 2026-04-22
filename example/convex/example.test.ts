@@ -3,6 +3,42 @@ import { initConvexTest } from "./setup.test";
 import { api } from "./_generated/api";
 
 describe("example", () => {
+  test("bootstraps default site once", async () => {
+    const t = initConvexTest();
+
+    const siteId = await t.mutation(api.example.setupDefaultSite, {});
+    expect(siteId).toBeDefined();
+
+    const site = await t.query(api.example.getSiteBySlug, {
+      slug: "default",
+    });
+    expect(site?._id).toBe(siteId);
+    expect(site?.name).toBe("Default site");
+    expect(site?.writeKeyHash).not.toBe("write_demo_local");
+  });
+
+  test("reconciles the default site write key on repeated setup", async () => {
+    vi.stubEnv("ANALYTICS_WRITE_KEY", "write_first");
+    const t = initConvexTest();
+
+    const siteId = await t.mutation(api.example.setupDefaultSite, {});
+
+    vi.stubEnv("ANALYTICS_WRITE_KEY", "write_second");
+    const repeatedSiteId = await t.mutation(api.example.setupDefaultSite, {});
+
+    expect(repeatedSiteId).toBe(siteId);
+
+    const result = await t.mutation(api.example.ingestExampleBatch, {
+      writeKey: "write_second",
+      visitorId: "visitor-1",
+      sessionId: "session-1",
+      events: [{ type: "pageview", path: "/" }],
+    });
+
+    expect(result).toEqual({ accepted: 1, rejected: 0 });
+    vi.unstubAllEnvs();
+  });
+
   test("creates a site and ingests events through app wrappers", async () => {
     vi.useFakeTimers();
     try {
@@ -21,7 +57,7 @@ describe("example", () => {
       visitorId: "visitor-1",
       sessionId: "session-1",
       events: [
-        { type: "pageview", path: "/", occurredAt: now, eventId: "event-1" },
+        { type: "pageview", path: "/", occurredAt: now },
       ],
     });
     expect(result.accepted).toBe(1);

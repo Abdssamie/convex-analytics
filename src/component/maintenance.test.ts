@@ -29,8 +29,7 @@ describe("maintenance cleanup", () => {
 					eventType: "track",
 					eventName: "old_event",
 					source: "web",
-					aggregationStatus: "done",
-					aggregationAttempts: 1,
+					aggregatedAt: oldOccurredAt + index,
 				});
 			}
 			await ctx.db.insert("events", {
@@ -42,8 +41,7 @@ describe("maintenance cleanup", () => {
 				eventType: "track",
 				eventName: "recent_event",
 				source: "web",
-				aggregationStatus: "done",
-				aggregationAttempts: 1,
+				aggregatedAt: recentOccurredAt,
 			});
 			await ctx.db.insert("events", {
 				siteId,
@@ -54,8 +52,7 @@ describe("maintenance cleanup", () => {
 				eventType: "track",
 				eventName: "pending_event",
 				source: "web",
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 		});
 
@@ -80,15 +77,9 @@ describe("maintenance cleanup", () => {
 				.withIndex("by_siteId_and_occurredAt", (q) => q.eq("siteId", siteId))
 				.take(300);
 		});
-		expect(remainingEvents).toHaveLength(2);
-		expect(
-			remainingEvents.map((row) => ({
-				eventName: row.eventName,
-				aggregationStatus: row.aggregationStatus,
-			})),
-		).toEqual([
-			{ eventName: "pending_event", aggregationStatus: "pending" },
-			{ eventName: "recent_event", aggregationStatus: "done" },
+		expect(remainingEvents).toHaveLength(1);
+		expect(remainingEvents.map((row) => row.eventName)).toEqual([
+			"recent_event",
 		]);
 		vi.useRealTimers();
 	});
@@ -118,8 +109,7 @@ describe("maintenance cleanup", () => {
 					eventType: "track",
 					eventName: "old_event",
 					source: "web",
-					aggregationStatus: "done",
-					aggregationAttempts: 1,
+					aggregatedAt: oldOccurredAt + index,
 				});
 			}
 

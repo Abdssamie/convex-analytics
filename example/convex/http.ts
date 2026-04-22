@@ -6,14 +6,6 @@ const http = httpRouter();
 
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "default",
-      name: "Default site",
-      writeKey: process.env.ANALYTICS_WRITE_KEY ?? "write_demo_local",
-      allowedOrigins: [],
-    },
-  ],
 });
 
 export default http;

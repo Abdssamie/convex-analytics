@@ -1,7 +1,7 @@
 import { mutation, internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { internal, api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { contextValidator, eventInputValidator } from "./types";
 import type { IdOfSite } from "./types";
@@ -9,10 +9,8 @@ import {
 	maxBatchSize,
 	defaultSettings,
 	aggregationBatchLimit,
-	aggregationRetryDelayMs,
 	hourMs,
 	dayMs,
-	maxAggregationAttempts,
 } from "./constants";
 import {
 	normalizeEventName,
@@ -32,12 +30,11 @@ export const ingestBatch = mutation({
 	},
 	returns: v.object({
 		accepted: v.number(),
-		duplicate: v.number(),
 		rejected: v.number(),
 	}),
 	handler: async (ctx, args) => {
 		if (args.events.length === 0) {
-			return { accepted: 0, duplicate: 0, rejected: 0 };
+			return { accepted: 0, rejected: 0 };
 		}
 		if (args.events.length > maxBatchSize) {
 			throw new Error(`Batch too large. Max ${maxBatchSize} events.`);
@@ -62,7 +59,6 @@ export const ingestBatch = mutation({
 
 		const receivedAt = Date.now();
 		let accepted = 0;
-		let duplicate = 0;
 		let rejected = 0;
 		let identifiedUserId: string | undefined;
 		const insertedEventIds: Array<Id<"events">> = [];
@@ -73,29 +69,6 @@ export const ingestBatch = mutation({
 			if (!eventName) {
 				rejected += 1;
 				continue;
-			}
-			const dedupeKey =
-				event.eventId ??
-				`${args.visitorId}:${args.sessionId}:${occurredAt}:${event.type}:${eventName}:${event.path ?? ""}`;
-			const duplicateDedupe = await ctx.db
-				.query("ingestDedupes")
-				.withIndex("by_siteId_and_dedupeKey", (q) =>
-					q.eq("siteId", site._id).eq("dedupeKey", dedupeKey),
-				)
-				.unique();
-			if (duplicateDedupe && duplicateDedupe.expiresAt > receivedAt) {
-				duplicate += 1;
-				continue;
-			}
-			if (!duplicateDedupe) {
-				await ctx.db.insert("ingestDedupes", {
-					siteId: site._id,
-					dedupeKey,
-					expiresAt:
-						receivedAt +
-						(site.settings.dedupeRetentionMs ??
-							defaultSettings.dedupeRetentionMs),
-				});
 			}
 
 			const properties = sanitizeProperties(event.properties, site.settings);
@@ -120,9 +93,7 @@ export const ingestBatch = mutation({
 				utmCampaign: args.context?.utmCampaign,
 				properties,
 				identifiedUserId,
-				dedupeKey,
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 			insertedEventIds.push(eventDbId);
 
@@ -131,14 +102,49 @@ export const ingestBatch = mutation({
 
 
 		if (insertedEventIds.length > 0) {
-			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
-				eventIds: insertedEventIds,
+			await ctx.scheduler.runAfter(0, internal.ingest.reducePendingSiteEvents, {
+				siteId: site._id,
 			});
 		}
 
-		return { accepted, duplicate, rejected };
+		return { accepted, rejected };
 	},
 });
+
+export const reducePendingSiteEvents = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+	},
+	returns: v.object({
+		aggregated: v.number(),
+		skipped: v.number(),
+		failed: v.number(),
+		hasMore: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const pendingEvents = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregatedAt_and_occurredAt", (q) =>
+				q.eq("siteId", args.siteId).eq("aggregatedAt", null),
+			)
+			.take(aggregationBatchLimit + 1);
+		const eventIds = pendingEvents
+			.slice(0, aggregationBatchLimit)
+			.map((event) => event._id);
+		const result = await aggregateEventsByIds(ctx, eventIds);
+		const hasMore = pendingEvents.length > aggregationBatchLimit;
+		if (hasMore) {
+			await ctx.scheduler.runAfter(0, internal.ingest.reducePendingSiteEvents, {
+				siteId: args.siteId,
+			});
+		}
+		return {
+			...result,
+			hasMore,
+		};
+	},
+});
+
 export const aggregateEventBatch = internalMutation({
 	args: {
 		eventIds: v.array(v.id("events")),
@@ -149,131 +155,7 @@ export const aggregateEventBatch = internalMutation({
 		failed: v.number(),
 	}),
 	handler: async (ctx, args) => {
-		const result = await aggregateEventsByIds(ctx, args.eventIds);
-		if (result.retriableEventIds.length > 0) {
-			await ctx.scheduler.runAfter(
-				aggregationRetryDelayMs,
-				internal.ingest.aggregateEventBatch,
-				{ eventIds: result.retriableEventIds },
-			);
-		}
-		return {
-			aggregated: result.aggregated,
-			skipped: result.skipped,
-			failed: result.failed,
-		};
-	},
-});
-export const aggregatePending = mutation({
-	args: {
-		siteId: v.id("sites"),
-		now: v.optional(v.number()),
-		limit: v.optional(v.number()),
-	},
-	returns: v.object({
-		aggregated: v.number(),
-		skipped: v.number(),
-		failed: v.number(),
-		remaining: v.number(),
-	}),
-	handler: async (ctx, args) => {
-		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
-		const now = args.now ?? Date.now();
-		const rows = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("aggregationStatus", "pending")
-					.lte("occurredAt", now),
-			)
-			.take(limit + 1);
-		const eventIds = rows.slice(0, limit).map((row) => row._id);
-		const result =
-			eventIds.length === 0
-				? {
-						aggregated: 0,
-						skipped: 0,
-						failed: 0,
-						retriableEventIds: [],
-					}
-				: await aggregateEventsByIds(ctx, eventIds);
-		if (result.retriableEventIds.length > 0) {
-			await ctx.scheduler.runAfter(
-				aggregationRetryDelayMs,
-				internal.ingest.aggregateEventBatch,
-				{ eventIds: result.retriableEventIds },
-			);
-		}
-		if (rows.length > limit) {
-			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
-				siteId: args.siteId,
-				now,
-				limit,
-			});
-		} else {
-			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
-				siteId: args.siteId,
-				interval: "hour",
-			});
-			await ctx.scheduler.runAfter(0, internal.compaction.compactShards, {
-				siteId: args.siteId,
-				interval: "day",
-			});
-		}
-		return {
-			aggregated: result.aggregated,
-			skipped: result.skipped,
-			failed: result.failed,
-			remaining: Math.max(0, rows.length - limit),
-		};
-	},
-});
-
-export const retryFailedEvents = mutation({
-	args: {
-		siteId: v.id("sites"),
-		limit: v.optional(v.number()),
-		runUntilComplete: v.optional(v.boolean()),
-	},
-	returns: v.object({
-		requeued: v.number(),
-		hasMore: v.boolean(),
-	}),
-	handler: async (ctx, args) => {
-		const limit = Math.min(args.limit ?? aggregationBatchLimit, 500);
-		const rows = await ctx.db
-			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q.eq("siteId", args.siteId).eq("aggregationStatus", "failed"),
-			)
-			.take(limit + 1);
-		const toRequeue = rows.slice(0, limit);
-		for (const row of toRequeue) {
-			await ctx.db.patch(row._id, {
-				aggregationStatus: "pending",
-				aggregationError: "",
-				aggregationAttempts: 0,
-			});
-		}
-		const hasMore = rows.length > limit;
-		if (hasMore && args.runUntilComplete) {
-			await ctx.scheduler.runAfter(0, api.ingest.retryFailedEvents, {
-				siteId: args.siteId,
-				limit,
-				runUntilComplete: true,
-			});
-		}
-		if (toRequeue.length > 0) {
-			await ctx.scheduler.runAfter(0, api.ingest.aggregatePending, {
-				siteId: args.siteId,
-				limit,
-			});
-		}
-		return {
-			requeued: toRequeue.length,
-			hasMore,
-		};
+		return await aggregateEventsByIds(ctx, args.eventIds);
 	},
 });
 
@@ -285,11 +167,10 @@ export async function aggregateEventsByIds(
 	let skipped = 0;
 	let failed = 0;
 	const now = Date.now();
-	const retriableEventIds: Array<Id<"events">> = [];
 	const rollupDeltas = new Map<string, RollupShardDelta>();
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
-		if (!event || event.aggregationStatus === "done") {
+		if (!event || event.aggregatedAt !== null) {
 			skipped += 1;
 			continue;
 		}
@@ -339,31 +220,16 @@ export async function aggregateEventsByIds(
 				),
 			});
 			await ctx.db.patch(event._id, {
-				contributesSession: session.created,
-				contributesVisitor: visitor.created,
-				aggregationStatus: "done",
-				aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
-				aggregationError: "",
 				aggregatedAt: now,
 			});
 			aggregated += 1;
 		} catch (error) {
-			const nextAttempts = (event.aggregationAttempts ?? 0) + 1;
-			await ctx.db.patch(event._id, {
-				aggregationStatus: "failed",
-				aggregationAttempts: nextAttempts,
-				aggregationError:
-					error instanceof Error ? error.message : "Aggregation failed",
-			});
-			if (nextAttempts < maxAggregationAttempts) {
-				retriableEventIds.push(event._id);
-			}
 			failed += 1;
 		}
 	}
 	await flushRollupShards(ctx, rollupDeltas);
 
-	return { aggregated, skipped, failed, retriableEventIds };
+	return { aggregated, skipped, failed };
 }
 
 export async function upsertVisitor(
@@ -375,7 +241,7 @@ export async function upsertVisitor(
 		identifiedUserId?: string;
 		traits?: Record<string, string | number | boolean | null>;
 	},
-) {
+	) {
 	const existing = await ctx.db
 		.query("visitors")
 		.withIndex("by_siteId_and_visitorId", (q) =>
@@ -383,8 +249,10 @@ export async function upsertVisitor(
 		)
 		.unique();
 	if (existing) {
+		const firstSeenAt = Math.min(existing.firstSeenAt, args.seenAt);
 		const lastSeenAt = Math.max(existing.lastSeenAt, args.seenAt);
 		await ctx.db.patch(existing._id, {
+			firstSeenAt,
 			lastSeenAt,
 			identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
 			traits: args.traits ?? existing.traits,
@@ -451,10 +319,7 @@ export async function upsertSession(
 			utmMedium: args.utmMedium,
 			utmCampaign: args.utmCampaign,
 			identifiedUserId: args.identifiedUserId,
-			eventCount: 1,
 			pageviewCount: pageviewIncrement,
-			durationMs: 0,
-			bounce: pageviewIncrement <= 1,
 		});
 		return {
 			...(await ctx.db.get(id))!,
@@ -482,10 +347,7 @@ export async function upsertSession(
 		utmMedium: existing.utmMedium ?? args.utmMedium,
 		utmCampaign: existing.utmCampaign ?? args.utmCampaign,
 		identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
-		eventCount: existing.eventCount + 1,
 		pageviewCount: nextPageviewCount,
-		durationMs: Math.max(0, lastSeenAt - startedAt),
-		bounce: nextPageviewCount <= 1,
 	});
 	return {
 		...(await ctx.db.get(existing._id))!,

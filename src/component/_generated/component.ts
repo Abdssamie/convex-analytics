@@ -129,13 +129,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           page: Array<{
             _creationTime: number;
             _id: string;
-            aggregatedAt?: number;
-            aggregationAttempts?: number;
-            aggregationError?: string;
-            aggregationStatus?: "pending" | "done" | "failed";
-            contributesSession?: boolean;
-            contributesVisitor?: boolean;
-            dedupeKey?: string;
+            aggregatedAt?: number | null;
             eventName: string;
             eventType: "pageview" | "track" | "identify";
             identifiedUserId?: string;
@@ -208,18 +202,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       >;
     };
     ingest: {
-      aggregatePending: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; now?: number; siteId: string },
-        {
-          aggregated: number;
-          failed: number;
-          remaining: number;
-          skipped: number;
-        },
-        Name
-      >;
       ingestBatch: FunctionReference<
         "mutation",
         "internal",
@@ -235,7 +217,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             utmSource?: string;
           };
           events: Array<{
-            eventId?: string;
             name?: string;
             occurredAt?: number;
             path?: string;
@@ -250,14 +231,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           visitorId: string;
           writeKeyHash: string;
         },
-        { accepted: number; duplicate: number; rejected: number },
-        Name
-      >;
-      retryFailedEvents: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; runUntilComplete?: boolean; siteId: string },
-        { hasMore: boolean; requeued: number },
+        { accepted: number; rejected: number },
         Name
       >;
     };
@@ -280,13 +254,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         },
         Name
       >;
-      pruneExpired: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; now?: number },
-        number,
-        Name
-      >;
     };
     sites: {
       createSite: FunctionReference<
@@ -296,28 +263,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
           dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
-          deniedPropertyKeys?: Array<string>;
-          hourlyRollupRetentionDays?: number;
-          name: string;
-          rawEventRetentionDays?: number;
-          retentionDays?: number;
-          rollupShardCount?: number;
-          sessionTimeoutMs?: number;
-          slug: string;
-          writeKeyHash: string;
-        },
-        string,
-        Name
-      >;
-      ensureSite: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          allowedOrigins?: Array<string>;
-          allowedPropertyKeys?: Array<string>;
-          dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name: string;
@@ -344,7 +289,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           settings: {
             allowedPropertyKeys?: Array<string>;
             dailyRollupRetentionDays?: number;
-            dedupeRetentionMs?: number;
             deniedPropertyKeys?: Array<string>;
             hourlyRollupRetentionDays?: number;
             rawEventRetentionDays?: number;
@@ -373,7 +317,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           allowedOrigins?: Array<string>;
           allowedPropertyKeys?: Array<string>;
           dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
           deniedPropertyKeys?: Array<string>;
           hourlyRollupRetentionDays?: number;
           name?: string;

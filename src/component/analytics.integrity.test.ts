@@ -68,4 +68,184 @@ describe("analytics integrity regressions", () => {
 		},
 		30_000,
 	);
+
+	test(
+		"partial-hour top sources use full-hour rollup plus small prefix correction",
+		async () => {
+			const t = initConvexTest();
+			const siteId = await t.mutation(api.sites.createSite, {
+				slug: `site-${Math.random().toString(36).slice(2, 8)}`,
+				name: "Edge Hour Test",
+				writeKeyHash: "write_edge_hour",
+			});
+			const bucketStart = Date.UTC(2026, 0, 8, 12, 0, 0);
+			const queryFrom = bucketStart + 15 * 60 * 1000;
+			const queryTo = bucketStart + hourMs;
+			const prefixEnd = queryFrom;
+
+			await t.run(async (ctx) => {
+				await ctx.db.insert("rollupShards", {
+					siteId,
+					interval: "hour",
+					bucketStart,
+					dimension: "utmSource",
+					key: "newsletter",
+					shard: 0,
+					count: 36_000,
+					uniqueVisitorCount: 0,
+					sessionCount: 0,
+					pageviewCount: 0,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: bucketStart,
+				});
+				await ctx.db.insert("rollupShards", {
+					siteId,
+					interval: "hour",
+					bucketStart,
+					dimension: "utmSource",
+					key: "ads",
+					shard: 0,
+					count: 12_000,
+					uniqueVisitorCount: 0,
+					sessionCount: 0,
+					pageviewCount: 0,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: bucketStart,
+				});
+
+				for (let index = 0; index < 9_000; index += 1) {
+					await ctx.db.insert("events", {
+						siteId,
+						receivedAt: bucketStart + index,
+						occurredAt: bucketStart + Math.floor((index * 15 * 60 * 1000) / 9_000),
+						visitorId: `newsletter-visitor-${index}`,
+						sessionId: `newsletter-session-${index}`,
+						eventType: "track",
+						eventName: "signup_click",
+						utmSource: "newsletter",
+					});
+				}
+				for (let index = 0; index < 3_000; index += 1) {
+					await ctx.db.insert("events", {
+						siteId,
+						receivedAt: prefixEnd + index,
+						occurredAt: bucketStart + Math.floor((index * 15 * 60 * 1000) / 3_000),
+						visitorId: `ads-visitor-${index}`,
+						sessionId: `ads-session-${index}`,
+						eventType: "track",
+						eventName: "signup_click",
+						utmSource: "ads",
+					});
+				}
+			});
+
+			const topSources = await t.query(api.analytics.getTopSources, {
+				siteId,
+				from: queryFrom,
+				to: queryTo,
+				limit: 10,
+			});
+			expect(topSources).toEqual([
+				{ key: "newsletter", count: 27_000, pageviewCount: 0 },
+				{ key: "ads", count: 9_000, pageviewCount: 0 },
+			]);
+		},
+		30_000,
+	);
+
+	test(
+		"partial-hour overview uses full-hour rollup plus small prefix correction",
+		async () => {
+			const t = initConvexTest();
+			const siteId = await t.mutation(api.sites.createSite, {
+				slug: `site-${Math.random().toString(36).slice(2, 8)}`,
+				name: "Edge Overview Test",
+				writeKeyHash: "write_edge_overview",
+			});
+			const bucketStart = Date.UTC(2026, 0, 8, 14, 0, 0);
+			const queryFrom = bucketStart + 15 * 60 * 1000;
+			const queryTo = bucketStart + hourMs;
+
+			await t.run(async (ctx) => {
+				await ctx.db.insert("rollupShards", {
+					siteId,
+					interval: "hour",
+					bucketStart,
+					dimension: "overview",
+					key: "all",
+					shard: 0,
+					count: 36_000,
+					uniqueVisitorCount: 12_000,
+					sessionCount: 18_000,
+					pageviewCount: 24_000,
+					bounceCount: 0,
+					durationMs: 0,
+					updatedAt: bucketStart,
+				});
+
+				for (let index = 0; index < 9_000; index += 1) {
+					const occurredAt =
+						bucketStart + Math.floor((index * 15 * 60 * 1000) / 9_000);
+					await ctx.db.insert("events", {
+						siteId,
+						receivedAt: bucketStart + index,
+						occurredAt,
+						visitorId: `visitor-${index}`,
+						sessionId: `session-${index}`,
+						eventType: index % 3 === 0 ? "pageview" : "track",
+						eventName: index % 3 === 0 ? "pageview" : "signup_click",
+					});
+					if (index % 3 === 0) {
+						await ctx.db.insert("visitors", {
+							siteId,
+							visitorId: `visitor-${index}`,
+							firstSeenAt: occurredAt,
+							lastSeenAt: occurredAt,
+						});
+					}
+					if (index % 2 === 0) {
+						await ctx.db.insert("sessions", {
+							siteId,
+							visitorId: `visitor-${index}`,
+							sessionId: `session-${index}`,
+							startedAt: occurredAt,
+							lastSeenAt: occurredAt,
+							pageviewCount: index % 3 === 0 ? 1 : 0,
+						});
+					}
+				}
+			});
+
+			const overview = await t.query(api.analytics.getOverview, {
+				siteId,
+				from: queryFrom,
+				to: queryTo,
+			});
+			expect(overview).toMatchObject({
+				events: 27_000,
+				visitors: 9_000,
+				sessions: 13_500,
+				pageviews: 21_000,
+			});
+
+			const timeseries = await t.query(api.analytics.getTimeseries, {
+				siteId,
+				from: queryFrom,
+				to: queryTo,
+				interval: "hour",
+			});
+			expect(timeseries).toEqual([
+				{
+					bucketStart,
+					events: 27_000,
+					pageviews: 21_000,
+					sessions: 13_500,
+					visitors: 9_000,
+				},
+			]);
+		},
+		30_000,
+	);
 });

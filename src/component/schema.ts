@@ -16,7 +16,6 @@ export default defineSchema({
 			rawEventRetentionDays: v.optional(v.number()),
 			hourlyRollupRetentionDays: v.optional(v.number()),
 			dailyRollupRetentionDays: v.optional(v.number()),
-			dedupeRetentionMs: v.optional(v.number()),
 			rollupShardCount: v.optional(v.number()),
 			allowedPropertyKeys: v.optional(v.array(v.string())),
 			deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -36,6 +35,7 @@ export default defineSchema({
 		traits: v.optional(v.record(v.string(), propertyValue)),
 	})
 		.index("by_siteId_and_visitorId", ["siteId", "visitorId"])
+		.index("by_siteId_and_firstSeenAt", ["siteId", "firstSeenAt"])
 		.index("by_siteId_and_identifiedUserId", ["siteId", "identifiedUserId"]),
 
 	sessions: defineTable({
@@ -55,10 +55,7 @@ export default defineSchema({
 		os: v.optional(v.string()),
 		country: v.optional(v.string()),
 		identifiedUserId: v.optional(v.string()),
-		eventCount: v.number(),
 		pageviewCount: v.number(),
-		durationMs: v.number(),
-		bounce: v.boolean(),
 	})
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
 		.index("by_siteId_and_sessionId_and_startedAt", [
@@ -94,15 +91,7 @@ export default defineSchema({
 		utmCampaign: v.optional(v.string()),
 		properties: v.optional(v.record(v.string(), propertyValue)),
 		identifiedUserId: v.optional(v.string()),
-		dedupeKey: v.optional(v.string()),
-		contributesVisitor: v.optional(v.boolean()),
-		contributesSession: v.optional(v.boolean()),
-		aggregationStatus: v.optional(
-			v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
-		),
-		aggregationAttempts: v.optional(v.number()),
-		aggregationError: v.optional(v.string()),
-		aggregatedAt: v.optional(v.number()),
+		aggregatedAt: v.optional(v.union(v.number(), v.null())),
 	})
 		.index("by_siteId_and_occurredAt", ["siteId", "occurredAt"])
 		.index("by_siteId_and_eventName_and_occurredAt", [
@@ -111,9 +100,9 @@ export default defineSchema({
 			"occurredAt",
 		])
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
-		.index("by_siteId_and_aggregationStatus_and_occurredAt", [
+		.index("by_siteId_and_aggregatedAt_and_occurredAt", [
 			"siteId",
-			"aggregationStatus",
+			"aggregatedAt",
 			"occurredAt",
 		]),
 
@@ -154,12 +143,4 @@ export default defineSchema({
 			"bucketStart",
 		])
 		.index("by_site_interval_bucket", ["siteId", "interval", "bucketStart"]),
-
-	ingestDedupes: defineTable({
-		siteId: v.id("sites"),
-		dedupeKey: v.string(),
-		expiresAt: v.number(),
-	})
-		.index("by_siteId_and_dedupeKey", ["siteId", "dedupeKey"])
-		.index("by_expiresAt", ["expiresAt"]),
 });

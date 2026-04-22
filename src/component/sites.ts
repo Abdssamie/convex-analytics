@@ -1,10 +1,6 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import {
-	siteSettingsFromArgs,
-	sameSiteSettings,
-	sameStringArray,
-} from "./helpers";
+import { siteSettingsFromArgs } from "./helpers";
 import { siteValidator } from "./types";
 
 export const createSite = mutation({
@@ -18,7 +14,6 @@ export const createSite = mutation({
 		rawEventRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
-		dedupeRetentionMs: v.optional(v.number()),
 		rollupShardCount: v.optional(v.number()),
 		allowedPropertyKeys: v.optional(v.array(v.string())),
 		deniedPropertyKeys: v.optional(v.array(v.string())),
@@ -45,63 +40,6 @@ export const createSite = mutation({
 		});
 	},
 });
-export const ensureSite = mutation({
-	args: {
-		slug: v.string(),
-		name: v.string(),
-		writeKeyHash: v.string(),
-		allowedOrigins: v.optional(v.array(v.string())),
-		sessionTimeoutMs: v.optional(v.number()),
-		retentionDays: v.optional(v.number()),
-		rawEventRetentionDays: v.optional(v.number()),
-		hourlyRollupRetentionDays: v.optional(v.number()),
-		dailyRollupRetentionDays: v.optional(v.number()),
-		dedupeRetentionMs: v.optional(v.number()),
-		rollupShardCount: v.optional(v.number()),
-		allowedPropertyKeys: v.optional(v.array(v.string())),
-		deniedPropertyKeys: v.optional(v.array(v.string())),
-	},
-	returns: v.id("sites"),
-	handler: async (ctx, args) => {
-		const now = Date.now();
-		const existing = await ctx.db
-			.query("sites")
-			.withIndex("by_slug", (q) => q.eq("slug", args.slug))
-			.unique();
-		if (!existing) {
-			return await ctx.db.insert("sites", {
-				slug: args.slug,
-				name: args.name,
-				status: "active",
-				writeKeyHash: args.writeKeyHash,
-				allowedOrigins: args.allowedOrigins ?? [],
-				settings: siteSettingsFromArgs(args),
-				createdAt: now,
-				updatedAt: now,
-			});
-		}
-		const nextAllowedOrigins = args.allowedOrigins ?? existing.allowedOrigins;
-		const nextSettings = siteSettingsFromArgs(args, existing.settings);
-		if (
-			existing.name === args.name &&
-			existing.status === "active" &&
-			existing.writeKeyHash === args.writeKeyHash &&
-			sameStringArray(existing.allowedOrigins, nextAllowedOrigins) &&
-			sameSiteSettings(existing.settings, nextSettings)
-		) {
-			return existing._id;
-		}
-		await ctx.db.patch(existing._id, {
-			name: args.name,
-			status: "active",
-			writeKeyHash: args.writeKeyHash,
-			allowedOrigins: nextAllowedOrigins,
-			settings: nextSettings,
-			updatedAt: now,
-		});
-		return existing._id;
-	},
-});
 export const updateSite = mutation({
 	args: {
 		siteId: v.id("sites"),
@@ -113,7 +51,6 @@ export const updateSite = mutation({
 		rawEventRetentionDays: v.optional(v.number()),
 		hourlyRollupRetentionDays: v.optional(v.number()),
 		dailyRollupRetentionDays: v.optional(v.number()),
-		dedupeRetentionMs: v.optional(v.number()),
 		rollupShardCount: v.optional(v.number()),
 		allowedPropertyKeys: v.optional(v.array(v.string())),
 		deniedPropertyKeys: v.optional(v.array(v.string())),

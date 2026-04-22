@@ -45,7 +45,6 @@ export function createAnalytics(options: {
 	function enqueue(event: AnalyticsEvent) {
 		queue.push({
 			occurredAt: Date.now(),
-			eventId: randomId(),
 			...event,
 		});
 		if (queue.length >= maxBatchSize) {

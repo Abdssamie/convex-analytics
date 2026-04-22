@@ -81,7 +81,6 @@ export function normalizeEvents(value: unknown): IngestEventInput[] {
 			"title",
 			"referrer",
 			"userId",
-			"eventId",
 		] as const) {
 			if (typeof record[key] === "string") {
 				event[key] = record[key];
