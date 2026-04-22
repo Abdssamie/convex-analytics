@@ -45,7 +45,6 @@ export function exposeAdminApi(
 ) {
 	const {
 		createSite,
-		ensureSite,
 		updateSite,
 		rotateWriteKey,
 		getSiteBySlug,
@@ -54,7 +53,6 @@ export function exposeAdminApi(
 	} = exposeApi(component, options);
 	return {
 		createSite,
-		ensureSite,
 		updateSite,
 		rotateWriteKey,
 		getSiteBySlug,
@@ -104,56 +102,6 @@ export function exposeApi(
 					deniedPropertyKeys,
 				} = args;
 				return await ctx.runMutation(component.sites.createSite, {
-					slug,
-					name,
-					allowedOrigins,
-					sessionTimeoutMs,
-					retentionDays,
-					rawEventRetentionDays,
-					hourlyRollupRetentionDays,
-					dailyRollupRetentionDays,
-					dedupeRetentionMs,
-					rollupShardCount,
-					allowedPropertyKeys,
-					deniedPropertyKeys,
-					writeKeyHash: await hashWriteKey(writeKey),
-				});
-			},
-		}),
-		ensureSite: mutationGeneric({
-			args: {
-				slug: v.string(),
-				name: v.string(),
-				writeKey: v.string(),
-				allowedOrigins: v.optional(v.array(v.string())),
-				sessionTimeoutMs: v.optional(v.number()),
-				retentionDays: v.optional(v.number()),
-				rawEventRetentionDays: v.optional(v.number()),
-				hourlyRollupRetentionDays: v.optional(v.number()),
-				dailyRollupRetentionDays: v.optional(v.number()),
-				dedupeRetentionMs: v.optional(v.number()),
-				rollupShardCount: v.optional(v.number()),
-				allowedPropertyKeys: v.optional(v.array(v.string())),
-				deniedPropertyKeys: v.optional(v.array(v.string())),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, { type: "admin" });
-				const {
-					writeKey,
-					slug,
-					name,
-					allowedOrigins,
-					sessionTimeoutMs,
-					retentionDays,
-					rawEventRetentionDays,
-					hourlyRollupRetentionDays,
-					dailyRollupRetentionDays,
-					dedupeRetentionMs,
-					rollupShardCount,
-					allowedPropertyKeys,
-					deniedPropertyKeys,
-				} = args;
-				return await ctx.runMutation(component.sites.ensureSite, {
 					slug,
 					name,
 					allowedOrigins,

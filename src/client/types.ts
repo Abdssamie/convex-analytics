@@ -11,22 +11,6 @@ export type ActionCtx = Pick<
 	GenericActionCtx<GenericDataModel>,
 	"runQuery" | "runMutation" | "runAction"
 >;
-export type SiteConfig = {
-	slug: string;
-	name: string;
-	writeKey?: string;
-	writeKeyHash?: string;
-	allowedOrigins?: string[];
-	sessionTimeoutMs?: number;
-	retentionDays?: number;
-	rawEventRetentionDays?: number;
-	hourlyRollupRetentionDays?: number;
-	dailyRollupRetentionDays?: number;
-	dedupeRetentionMs?: number;
-	rollupShardCount?: number;
-	allowedPropertyKeys?: string[];
-	deniedPropertyKeys?: string[];
-};
 export type AnalyticsEvent =
 	| {
 			type: "pageview";

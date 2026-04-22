@@ -286,27 +286,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         string,
         Name
       >;
-      ensureSite: FunctionReference<
-        "mutation",
-        "internal",
-        {
-          allowedOrigins?: Array<string>;
-          allowedPropertyKeys?: Array<string>;
-          dailyRollupRetentionDays?: number;
-          dedupeRetentionMs?: number;
-          deniedPropertyKeys?: Array<string>;
-          hourlyRollupRetentionDays?: number;
-          name: string;
-          rawEventRetentionDays?: number;
-          retentionDays?: number;
-          rollupShardCount?: number;
-          sessionTimeoutMs?: number;
-          slug: string;
-          writeKeyHash: string;
-        },
-        string,
-        Name
-      >;
       getSiteBySlug: FunctionReference<
         "query",
         "internal",

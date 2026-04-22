@@ -17,7 +17,6 @@ async function hashWriteKey(writeKey: string) {
 
 export const {
   createSite,
-  ensureSite,
   updateSite,
   rotateWriteKey,
   getSiteBySlug,

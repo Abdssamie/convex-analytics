@@ -2,7 +2,6 @@ import { httpActionGeneric } from "convex/server";
 import type { HttpRouter } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component";
 import type {
-	SiteConfig,
 	ActionCtx,
 	IngestContext,
 	IngestEventInput,
@@ -22,8 +21,6 @@ export function registerRoutes(
 	options?: {
 		path?: string;
 		allowedHeaders?: string[];
-		site?: SiteConfig;
-		sites?: SiteConfig[];
 	},
 ) {
 	const path = options?.path ?? "/analytics/ingest";
@@ -31,8 +28,6 @@ export function registerRoutes(
 		"content-type",
 		"x-analytics-write-key",
 	];
-	const configuredSites =
-		options?.sites ?? (options?.site ? [options.site] : []);
 	http.route({
 		path,
 		method: "OPTIONS",
@@ -59,36 +54,6 @@ export function registerRoutes(
 				);
 			}
 			const writeKeyHash = await hashWriteKey(writeKey);
-			if (configuredSites.length > 0) {
-				const configuredSite = await findConfiguredSite(
-					configuredSites,
-					writeKeyHash,
-				);
-				if (!configuredSite) {
-					return jsonResponse(
-						{ error: "Invalid analytics write key" },
-						401,
-						origin,
-					);
-				}
-				await ctx.runMutation(component.sites.ensureSite, {
-					slug: configuredSite.slug,
-					name: configuredSite.name,
-					writeKeyHash,
-					allowedOrigins: configuredSite.allowedOrigins,
-					sessionTimeoutMs: configuredSite.sessionTimeoutMs,
-					retentionDays: configuredSite.retentionDays,
-					rawEventRetentionDays: configuredSite.rawEventRetentionDays,
-					hourlyRollupRetentionDays:
-						configuredSite.hourlyRollupRetentionDays,
-					dailyRollupRetentionDays:
-						configuredSite.dailyRollupRetentionDays,
-					dedupeRetentionMs: configuredSite.dedupeRetentionMs,
-					rollupShardCount: configuredSite.rollupShardCount,
-					allowedPropertyKeys: configuredSite.allowedPropertyKeys,
-					deniedPropertyKeys: configuredSite.deniedPropertyKeys,
-				});
-			}
 			const body = await request.json();
 			const result = await ingestFromHttp(ctx, component, {
 				writeKeyHash,
@@ -135,20 +100,4 @@ export async function ingestFromHttp(
 		context: args.context,
 		events: args.events,
 	});
-}
-
-export async function findConfiguredSite(
-	sites: SiteConfig[],
-	writeKeyHash: string,
-) {
-	for (const site of sites) {
-		const configuredHash =
-			site.writeKeyHash ??
-			(site.writeKey ? await hashWriteKey(site.writeKey) : undefined);
-		if (configuredHash === writeKeyHash) {
-			return site;
-		}
-	}
-
-	return null;
 }

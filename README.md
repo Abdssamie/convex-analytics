@@ -25,7 +25,7 @@ The component owns its own Convex tables:
 - `sites`: one tracked site/app per write key
 - `visitors`: durable anonymous visitor records
 - `sessions`: session windows and coarse device/source summary
-- `events`: append-only raw events with pending/done aggregation state
+- `events`: append-only raw events with lightweight aggregation marker
 - `rollupShards`: sharded hourly/daily report counters
 - `ingestDedupes`: short-lived retry/idempotency cache
 
@@ -50,15 +50,15 @@ Why `sites` exists: one Convex deployment can track multiple sites or apps.
 For the common one-site case, create one site named `default` and ignore the
 multi-site parts until needed.
 
-Browser traffic should use the HTTP ingest route. Do not send every browser
-event through public Convex mutations. The SDK batches events and the HTTP route
-hashes the write key before calling the component.
+Browser traffic should use HTTP ingest route. Do not send every browser event
+through public Convex mutations. SDK batches events and HTTP route hashes write
+key before calling component.
 
 Ingest and reporting are split on purpose. `ingestBatch` writes raw events
-quickly, marks them `pending`, and schedules background aggregation. The worker
-materializes visitors, sessions, and rollup shards, then marks each event
-`done`. Compaction later collapses old shard fanout back to shard `0` so
-dashboard queries stay cheap.
+quickly, leaves `aggregatedAt: null`, and schedules background aggregation. The
+worker materializes visitors, sessions, and rollup shards, then stamps
+`aggregatedAt`. Compaction later collapses old shard fanout back to shard `0`
+so dashboard queries stay cheap.
 
 Dashboard queries are range-aware:
 
@@ -80,8 +80,21 @@ app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });
 export default app;
 ```
 
-Register the HTTP ingest route in `convex/http.ts`. The route config is the
-trusted site registry. Browser callers cannot create or modify sites.
+Create site once from backend/admin code, then register HTTP ingest route in
+`convex/http.ts`. Browser callers cannot create or modify sites.
+
+```ts
+// convex/example.ts
+import { components } from "./_generated/api";
+import { exposeAdminApi } from "@Abdssamie/convex-analytics";
+
+export const { createSite } = exposeAdminApi(components.convexAnalytics, {
+  auth: async () => {},
+});
+```
+
+Run `createSite(...)` one time per tracked site. After that, ingest route only
+accepts events for already-created sites.
 
 ```ts
 import { httpRouter } from "convex/server";
@@ -92,19 +105,6 @@ const http = httpRouter();
 
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "default",
-      name: "Default site",
-      writeKey: process.env.ANALYTICS_WRITE_KEY!,
-      allowedOrigins: ["https://example.com"],
-      retentionDays: 90,
-      rawEventRetentionDays: 90,
-      hourlyRollupRetentionDays: 90,
-      // Omit dailyRollupRetentionDays to keep daily rollups indefinitely.
-      dedupeRetentionMs: 24 * 60 * 60 * 1000,
-    },
-  ],
 });
 
 export default http;
@@ -172,31 +172,10 @@ export default crons;
 
 That is enough for normal installs.
 
-For multiple sites on the same Convex deployment, add more site configs with
-separate write keys and origins:
+For multiple sites on same Convex deployment, call `createSite(...)` once for
+each site with separate write keys and origins.
 
-```ts
-registerRoutes(http, components.convexAnalytics, {
-  path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "app",
-      name: "Product App",
-      writeKey: process.env.ANALYTICS_APP_WRITE_KEY!,
-      allowedOrigins: ["https://app.example.com"],
-    },
-    {
-      slug: "marketing",
-      name: "Marketing Site",
-      writeKey: process.env.ANALYTICS_MARKETING_WRITE_KEY!,
-      allowedOrigins: ["https://example.com"],
-    },
-  ],
-});
-```
-
-The route auto-ensures configured sites from server config during ingest. The
-component stores only `writeKeyHash`, not raw write keys.
+Component stores only `writeKeyHash`, not raw write keys.
 
 The browser write key is an ingest credential, not an admin secret. Treat it like
 a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
@@ -257,7 +236,6 @@ import { exposeAdminApi } from "@Abdssamie/convex-analytics";
 
 export const {
   createSite,
-  ensureSite,
   updateSite,
   rotateWriteKey,
   cleanupSite,
@@ -271,7 +249,7 @@ export const {
 
 Admin surface:
 
-- `createSite`, `ensureSite`, `updateSite`, `rotateWriteKey`
+- `createSite`, `updateSite`, `rotateWriteKey`
 - `cleanupSite(siteId? | slug?, now?, limit?, runUntilComplete?)`
 - `pruneExpired(now?, limit?)`
 
@@ -305,17 +283,6 @@ specific fields when needed:
 ```ts
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
-  sites: [
-    {
-      slug: "default",
-      name: "Default site",
-      writeKey: process.env.ANALYTICS_WRITE_KEY!,
-      rawEventRetentionDays: 30,
-      hourlyRollupRetentionDays: 14,
-      dailyRollupRetentionDays: 730,
-      dedupeRetentionMs: 6 * 60 * 60 * 1000,
-    },
-  ],
 });
 ```
 
