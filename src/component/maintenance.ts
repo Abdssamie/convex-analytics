@@ -91,7 +91,7 @@ export const cleanupSite = action({
 				? null
 				: now - daysToMs(site.settings.dailyRollupRetentionDays);
 
-		const events = await deleteDoneEventsBudget(ctx, {
+		const events = await deleteEventsBudget(ctx, {
 			siteId: site._id,
 			cutoff: rawEventCutoff,
 			limit,
@@ -167,7 +167,7 @@ export const resolveSiteForCleanup = internalQuery({
 	},
 });
 
-export const deleteDoneEventsPage = internalMutation({
+export const deleteEventsPage = internalMutation({
 	args: {
 		siteId: v.id("sites"),
 		cutoff: v.number(),
@@ -182,11 +182,8 @@ export const deleteDoneEventsPage = internalMutation({
 	handler: async (ctx, args) => {
 		const page = await ctx.db
 			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-				q
-					.eq("siteId", args.siteId)
-					.eq("aggregationStatus", "done")
-					.lt("occurredAt", args.cutoff),
+			.withIndex("by_siteId_and_occurredAt", (q) =>
+				q.eq("siteId", args.siteId).lt("occurredAt", args.cutoff),
 			)
 			.paginate({
 				numItems: Math.max(
@@ -242,7 +239,7 @@ export const deleteRollupShardsPage = internalMutation({
 	},
 });
 
-async function deleteDoneEventsBudget(
+async function deleteEventsBudget(
 	ctx: ActionCtx,
 	args: {
 		siteId: IdOfSite;
@@ -264,7 +261,7 @@ async function deleteDoneEventsBudget(
 			deleted: number;
 			continueCursor: string | null;
 			isDone: boolean;
-		} = await ctx.runMutation(internal.maintenance.deleteDoneEventsPage, {
+		} = await ctx.runMutation(internal.maintenance.deleteEventsPage, {
 			siteId: args.siteId,
 			cutoff: args.cutoff,
 			cursor,
@@ -319,17 +316,14 @@ async function deleteRollupShardsBudget(
 	}
 }
 
-export async function deleteDoneEventsBefore(
+export async function deleteEventsBefore(
 	ctx: MutationCtx,
 	args: { siteId: IdOfSite; cutoff: number; limit: number },
 ) {
 	const rows = await ctx.db
 		.query("events")
-		.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
-			q
-				.eq("siteId", args.siteId)
-				.eq("aggregationStatus", "done")
-				.lt("occurredAt", args.cutoff),
+		.withIndex("by_siteId_and_occurredAt", (q) =>
+			q.eq("siteId", args.siteId).lt("occurredAt", args.cutoff),
 		)
 		.take(args.limit);
 	await deleteRows(ctx, rows);

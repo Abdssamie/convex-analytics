@@ -186,17 +186,38 @@ describe("analytics integrity regressions", () => {
 				});
 
 				for (let index = 0; index < 9_000; index += 1) {
+					const occurredAt =
+						bucketStart + Math.floor((index * 15 * 60 * 1000) / 9_000);
 					await ctx.db.insert("events", {
 						siteId,
 						receivedAt: bucketStart + index,
-						occurredAt: bucketStart + Math.floor((index * 15 * 60 * 1000) / 9_000),
+						occurredAt,
 						visitorId: `visitor-${index}`,
 						sessionId: `session-${index}`,
 						eventType: index % 3 === 0 ? "pageview" : "track",
 						eventName: index % 3 === 0 ? "pageview" : "signup_click",
-						contributesVisitor: index % 3 === 0,
-						contributesSession: index % 2 === 0,
 					});
+					if (index % 3 === 0) {
+						await ctx.db.insert("visitors", {
+							siteId,
+							visitorId: `visitor-${index}`,
+							firstSeenAt: occurredAt,
+							lastSeenAt: occurredAt,
+						});
+					}
+					if (index % 2 === 0) {
+						await ctx.db.insert("sessions", {
+							siteId,
+							visitorId: `visitor-${index}`,
+							sessionId: `session-${index}`,
+							startedAt: occurredAt,
+							lastSeenAt: occurredAt,
+							eventCount: 1,
+							pageviewCount: index % 3 === 0 ? 1 : 0,
+							durationMs: 0,
+							bounce: true,
+						});
+					}
 				}
 			});
 

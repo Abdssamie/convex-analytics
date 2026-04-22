@@ -129,12 +129,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           page: Array<{
             _creationTime: number;
             _id: string;
-            aggregatedAt?: number;
-            aggregationAttempts?: number;
-            aggregationError?: string;
-            aggregationStatus?: "pending" | "done" | "failed";
-            contributesSession?: boolean;
-            contributesVisitor?: boolean;
+            aggregatedAt?: number | null;
             dedupeKey?: string;
             eventName: string;
             eventType: "pageview" | "track" | "identify";

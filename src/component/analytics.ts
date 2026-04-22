@@ -568,17 +568,20 @@ async function summarizeRawOverview(
 	ctx: QueryCtx,
 	args: { siteId: IdOfSite; from: number; to: number },
 ) {
+	if (args.from >= args.to) {
+		return {
+			count: 0,
+			uniqueVisitorCount: 0,
+			sessionCount: 0,
+			pageviewCount: 0,
+			bounceCount: 0,
+			durationMs: 0,
+		};
+	}
 	const totals = {
 		count: 0,
-		uniqueVisitorCount: 0,
-		sessionCount: 0,
 		pageviewCount: 0,
-		bounceCount: 0,
-		durationMs: 0,
 	};
-	if (args.from >= args.to) {
-		return totals;
-	}
 	for await (const event of ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
 		q
 			.eq("siteId", args.siteId)
@@ -587,10 +590,37 @@ async function summarizeRawOverview(
 	)) {
 		totals.count += 1;
 		totals.pageviewCount += event.eventType === "pageview" ? 1 : 0;
-		totals.sessionCount += event.contributesSession ? 1 : 0;
-		totals.uniqueVisitorCount += event.contributesVisitor ? 1 : 0;
 	}
-	return totals;
+	const [sessionStats, visitorCount] = await Promise.all([
+		querySessionStats(ctx, args),
+		queryVisitorCount(ctx, args),
+	]);
+	return {
+		count: totals.count,
+		uniqueVisitorCount: visitorCount,
+		sessionCount: sessionStats.sessionCount,
+		pageviewCount: totals.pageviewCount,
+		bounceCount: sessionStats.bounceCount,
+		durationMs: sessionStats.durationMs,
+	};
+}
+
+async function queryVisitorCount(
+	ctx: QueryCtx,
+	args: { siteId: IdOfSite; from: number; to: number },
+) {
+	if (args.from >= args.to) {
+		return 0;
+	}
+	const rows = await readAll(() =>
+		ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
+			q
+				.eq("siteId", args.siteId)
+				.gte("firstSeenAt", args.from)
+				.lt("firstSeenAt", args.to),
+		),
+	);
+	return rows.length;
 }
 
 async function summarizeRawTopDimension(

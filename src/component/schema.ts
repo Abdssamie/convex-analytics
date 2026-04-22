@@ -36,6 +36,7 @@ export default defineSchema({
 		traits: v.optional(v.record(v.string(), propertyValue)),
 	})
 		.index("by_siteId_and_visitorId", ["siteId", "visitorId"])
+		.index("by_siteId_and_firstSeenAt", ["siteId", "firstSeenAt"])
 		.index("by_siteId_and_identifiedUserId", ["siteId", "identifiedUserId"]),
 
 	sessions: defineTable({
@@ -95,14 +96,7 @@ export default defineSchema({
 		properties: v.optional(v.record(v.string(), propertyValue)),
 		identifiedUserId: v.optional(v.string()),
 		dedupeKey: v.optional(v.string()),
-		contributesVisitor: v.optional(v.boolean()),
-		contributesSession: v.optional(v.boolean()),
-		aggregationStatus: v.optional(
-			v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
-		),
-		aggregationAttempts: v.optional(v.number()),
-		aggregationError: v.optional(v.string()),
-		aggregatedAt: v.optional(v.number()),
+		aggregatedAt: v.optional(v.union(v.number(), v.null())),
 	})
 		.index("by_siteId_and_occurredAt", ["siteId", "occurredAt"])
 		.index("by_siteId_and_eventName_and_occurredAt", [
@@ -111,9 +105,9 @@ export default defineSchema({
 			"occurredAt",
 		])
 		.index("by_siteId_and_sessionId", ["siteId", "sessionId"])
-		.index("by_siteId_and_aggregationStatus_and_occurredAt", [
+		.index("by_siteId_and_aggregatedAt_and_occurredAt", [
 			"siteId",
-			"aggregationStatus",
+			"aggregatedAt",
 			"occurredAt",
 		]),
 

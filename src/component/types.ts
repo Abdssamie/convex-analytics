@@ -83,14 +83,7 @@ export const eventValidator = v.object({
 	properties: propertiesValidator,
 	identifiedUserId: v.optional(v.string()),
 	dedupeKey: v.optional(v.string()),
-	contributesVisitor: v.optional(v.boolean()),
-	contributesSession: v.optional(v.boolean()),
-	aggregationStatus: v.optional(
-		v.union(v.literal("pending"), v.literal("done"), v.literal("failed")),
-	),
-	aggregationAttempts: v.optional(v.number()),
-	aggregationError: v.optional(v.string()),
-	aggregatedAt: v.optional(v.number()),
+	aggregatedAt: v.optional(v.union(v.number(), v.null())),
 });
 export const sessionValidator = v.object({
 	_id: v.id("sessions"),

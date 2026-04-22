@@ -119,8 +119,7 @@ export const ingestBatch = mutation({
 				properties,
 				identifiedUserId,
 				dedupeKey,
-				aggregationStatus: "pending",
-				aggregationAttempts: 0,
+				aggregatedAt: null,
 			});
 			insertedEventIds.push(eventDbId);
 
@@ -167,10 +166,10 @@ export const aggregatePending = mutation({
 		const now = args.now ?? Date.now();
 		const rows = await ctx.db
 			.query("events")
-			.withIndex("by_siteId_and_aggregationStatus_and_occurredAt", (q) =>
+			.withIndex("by_siteId_and_aggregatedAt_and_occurredAt", (q) =>
 				q
 					.eq("siteId", args.siteId)
-					.eq("aggregationStatus", "pending")
+					.eq("aggregatedAt", null)
 					.lte("occurredAt", now),
 			)
 			.take(limit + 1);
@@ -219,7 +218,7 @@ export async function aggregateEventsByIds(
 	const rollupDeltas = new Map<string, RollupShardDelta>();
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
-		if (!event || event.aggregationStatus === "done") {
+		if (!event || event.aggregatedAt !== null) {
 			skipped += 1;
 			continue;
 		}
@@ -269,22 +268,10 @@ export async function aggregateEventsByIds(
 				),
 			});
 			await ctx.db.patch(event._id, {
-				contributesSession: session.created,
-				contributesVisitor: visitor.created,
-				aggregationStatus: "done",
-				aggregationAttempts: (event.aggregationAttempts ?? 0) + 1,
-				aggregationError: "",
 				aggregatedAt: now,
 			});
 			aggregated += 1;
 		} catch (error) {
-			const nextAttempts = (event.aggregationAttempts ?? 0) + 1;
-			await ctx.db.patch(event._id, {
-				aggregationStatus: "failed",
-				aggregationAttempts: nextAttempts,
-				aggregationError:
-					error instanceof Error ? error.message : "Aggregation failed",
-			});
 			failed += 1;
 		}
 	}

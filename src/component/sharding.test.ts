@@ -28,8 +28,7 @@ async function insertPendingPageviewEvents(
 					eventName: "pageview",
 					path: "/",
 					title: "Home",
-					aggregationStatus: "pending",
-					aggregationAttempts: 0,
+					aggregatedAt: null,
 				}),
 			);
 		}
