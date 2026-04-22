@@ -253,13 +253,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         { accepted: number; duplicate: number; rejected: number },
         Name
       >;
-      retryFailedEvents: FunctionReference<
-        "mutation",
-        "internal",
-        { limit?: number; runUntilComplete?: boolean; siteId: string },
-        { hasMore: boolean; requeued: number },
-        Name
-      >;
     };
     maintenance: {
       cleanupSite: FunctionReference<

@@ -1127,95 +1127,60 @@ describe("realistic ingestion, sharding, and compaction flows", () => {
 		expect(eventRowsAfter).toHaveLength(3);
 	});
 
-	test("failed aggregations retry with backoff, then stay failed until manual requeue", async () => {
-		vi.useFakeTimers();
-		try {
-			const { t, siteId } = await createSite();
-			const now = Date.UTC(2026, 0, 12, 12, 0, 0);
-			const eventId = await t.run(async (ctx) => {
-				const orphanSiteId = await ctx.db.insert("sites", {
-					slug: "orphan-site",
-					name: "Orphan",
-					status: "active",
-					writeKeyHash: "orphan",
-					allowedOrigins: [],
-						settings: {
-							sessionTimeoutMs: 30 * 60 * 1000,
-							retentionDays: 90,
-							rawEventRetentionDays: 90,
-							hourlyRollupRetentionDays: 90,
-							dedupeRetentionMs: 24 * 60 * 60 * 1000,
-							rollupShardCount: 1,
-						},
-					createdAt: now,
-					updatedAt: now,
-				});
-				const id = await ctx.db.insert("events", {
-					siteId: orphanSiteId,
-					receivedAt: now,
-					occurredAt: now,
-					visitorId: "visitor-1",
-					sessionId: "session-1",
-					eventType: "pageview",
-					eventName: "pageview",
-					path: "/broken",
-					aggregationStatus: "pending",
-					aggregationAttempts: 0,
-				});
-				await ctx.db.delete(orphanSiteId);
-				return id;
+	test("failed aggregations mark event failed once without auto requeue", async () => {
+		const { t } = await createSite();
+		const now = Date.UTC(2026, 0, 12, 12, 0, 0);
+		const eventId = await t.run(async (ctx) => {
+			const orphanSiteId = await ctx.db.insert("sites", {
+				slug: "orphan-site",
+				name: "Orphan",
+				status: "active",
+				writeKeyHash: "orphan",
+				allowedOrigins: [],
+				settings: {
+					sessionTimeoutMs: 30 * 60 * 1000,
+					retentionDays: 90,
+					rawEventRetentionDays: 90,
+					hourlyRollupRetentionDays: 90,
+					dedupeRetentionMs: 24 * 60 * 60 * 1000,
+					rollupShardCount: 1,
+				},
+				createdAt: now,
+				updatedAt: now,
 			});
-
-			await t.mutation(internal.ingest.aggregateEventBatch, {
-				eventIds: [eventId],
-			});
-			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
-
-			const failedAfterRetries = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(failedAfterRetries).toMatchObject({
-				aggregationStatus: "failed",
-				aggregationAttempts: 3,
-				aggregationError: "Site not found",
-			});
-
-			await t.run(async (ctx) => {
-				await ctx.db.patch(eventId, {
-					siteId,
-					aggregationStatus: "failed",
-				});
-			});
-
-			const requeue = await t.mutation(api.ingest.retryFailedEvents, {
-				siteId,
-				limit: 10,
-			});
-			expect(requeue).toEqual({ requeued: 1, hasMore: false });
-			const requeuedEvent = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(requeuedEvent).toMatchObject({
-				siteId,
+			const id = await ctx.db.insert("events", {
+				siteId: orphanSiteId,
+				receivedAt: now,
+				occurredAt: now,
+				visitorId: "visitor-1",
+				sessionId: "session-1",
+				eventType: "pageview",
+				eventName: "pageview",
+				path: "/broken",
 				aggregationStatus: "pending",
 				aggregationAttempts: 0,
-				aggregationError: "",
 			});
+			await ctx.db.delete(orphanSiteId);
+			return id;
+		});
 
-			await t.finishAllScheduledFunctions(() => vi.runAllTimers());
+		const result = await t.mutation(internal.ingest.aggregateEventBatch, {
+			eventIds: [eventId],
+		});
+		expect(result).toEqual({
+			aggregated: 0,
+			skipped: 0,
+			failed: 1,
+		});
 
-			const recovered = await t.run(async (ctx) => {
-				return await ctx.db.get(eventId);
-			});
-			expect(recovered).toMatchObject({
-				siteId,
-				aggregationStatus: "done",
-				aggregationAttempts: 1,
-				aggregationError: "",
-			});
-		} finally {
-			vi.useRealTimers();
-		}
+		const failedEvent = await t.run(async (ctx) => {
+			return await ctx.db.get(eventId);
+		});
+		expect(failedEvent).toMatchObject({
+			aggregationStatus: "failed",
+			aggregationAttempts: 1,
+			aggregationError: "Site not found",
+		});
 	});
 
 	test("event property breakdown groups custom track events by requested property", async () => {

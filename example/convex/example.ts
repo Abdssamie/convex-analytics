@@ -21,7 +21,6 @@ export const {
   updateSite,
   rotateWriteKey,
   aggregatePending,
-  retryFailedEvents,
   getSiteBySlug,
   cleanupSite,
   pruneExpired,

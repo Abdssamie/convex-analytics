@@ -49,7 +49,6 @@ export function exposeAdminApi(
 		updateSite,
 		rotateWriteKey,
 		aggregatePending,
-		retryFailedEvents,
 		getSiteBySlug,
 		cleanupSite,
 		pruneExpired,
@@ -60,7 +59,6 @@ export function exposeAdminApi(
 		updateSite,
 		rotateWriteKey,
 		aggregatePending,
-		retryFailedEvents,
 		getSiteBySlug,
 		cleanupSite,
 		pruneExpired,
@@ -226,20 +224,6 @@ export function exposeApi(
 					siteId: args.siteId,
 				});
 				return await ctx.runMutation(component.ingest.aggregatePending, args);
-			},
-		}),
-		retryFailedEvents: mutationGeneric({
-			args: {
-				siteId: v.string(),
-				limit: v.optional(v.number()),
-				runUntilComplete: v.optional(v.boolean()),
-			},
-			handler: async (ctx, args) => {
-				await options.auth(ctx, {
-					type: "admin",
-					siteId: args.siteId,
-				});
-				return await ctx.runMutation(component.ingest.retryFailedEvents, args);
 			},
 		}),
 		getSiteBySlug: queryGeneric({

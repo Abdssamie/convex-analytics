@@ -11,6 +11,4 @@ export const dayMs = 24 * hourMs;
 export const maxBatchSize = 50;
 export const maxPropertyKeys = 32;
 export const aggregationBatchLimit = 100;
-export const aggregationRetryDelayMs = 5_000;
-export const maxAggregationAttempts = 3;
 export const cleanupBatchLimit = 100;
