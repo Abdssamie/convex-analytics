@@ -256,25 +256,44 @@ export async function topDimension(
 	dimension: string,
 	limit: number,
 ) {
-	const plan = buildExactRangePlan(args.from, args.to);
 	const byKey = new Map<string, { count: number; pageviewCount: number }>();
-	for (const rawRange of plan.rawRanges) {
-		const events = await queryRawEvents(ctx, {
-			siteId: args.siteId,
-			from: rawRange.from,
-			to: rawRange.to,
-		});
-		for (const event of events) {
-			const key = keyForEventDimension(event, dimension);
-			if (!key) {
-				continue;
-			}
-			const current = byKey.get(key) ?? { count: 0, pageviewCount: 0 };
-			current.count += 1;
-			current.pageviewCount += event.eventType === "pageview" ? 1 : 0;
-			byKey.set(key, current);
+	const edgePlan = buildEdgeHourPlan(args.from, args.to);
+	for (const edge of edgePlan.edges) {
+		if (edge.kind === "raw") {
+			addTopRows(
+				byKey,
+				await summarizeRawTopDimension(ctx, {
+					siteId: args.siteId,
+					from: edge.from,
+					to: edge.to,
+					dimension,
+				}),
+			);
+			continue;
+		}
+		addTopRows(
+			byKey,
+			await queryDimensionRollups(ctx, {
+				siteId: args.siteId,
+				from: edge.bucketStart,
+				to: edge.bucketStart + hourMs,
+				interval: "hour",
+				dimension,
+			}),
+		);
+		for (const excludedRange of edge.excludeRanges) {
+			subtractTopRows(
+				byKey,
+				await summarizeRawTopDimension(ctx, {
+					siteId: args.siteId,
+					from: excludedRange.from,
+					to: excludedRange.to,
+					dimension,
+				}),
+			);
 		}
 	}
+	const plan = buildExactRangePlan(edgePlan.rollupRange.from, edgePlan.rollupRange.to);
 	for (const hourlyRange of plan.hourlyRanges) {
 		const rows = await queryDimensionRollups(ctx, {
 			siteId: args.siteId,
@@ -428,7 +447,6 @@ async function aggregateOverviewRange(
 	ctx: QueryCtx,
 	args: { siteId: IdOfSite; from: number; to: number },
 ) {
-	const plan = buildExactRangePlan(args.from, args.to);
 	const totals = {
 		count: 0,
 		uniqueVisitorCount: 0,
@@ -437,19 +455,46 @@ async function aggregateOverviewRange(
 		bounceCount: 0,
 		durationMs: 0,
 	};
-	for (const rawRange of plan.rawRanges) {
-		const events = await queryRawEvents(ctx, {
-			siteId: args.siteId,
-			from: rawRange.from,
-			to: rawRange.to,
-		});
-		for (const event of events) {
-			totals.count += 1;
-			totals.pageviewCount += event.eventType === "pageview" ? 1 : 0;
-			totals.sessionCount += event.contributesSession ? 1 : 0;
-			totals.uniqueVisitorCount += event.contributesVisitor ? 1 : 0;
+	const edgePlan = buildEdgeHourPlan(args.from, args.to);
+	for (const edge of edgePlan.edges) {
+		if (edge.kind === "raw") {
+			addOverviewTotals(
+				totals,
+				await summarizeRawOverview(ctx, {
+					siteId: args.siteId,
+					from: edge.from,
+					to: edge.to,
+				}),
+			);
+			continue;
+		}
+		addOverviewTotals(
+			totals,
+			sumRollups(
+				await queryHourlyRollups(
+					ctx,
+					{
+						siteId: args.siteId,
+						from: edge.bucketStart,
+						to: edge.bucketStart + hourMs,
+					},
+					"overview",
+					"all",
+				),
+			),
+		);
+		for (const excludedRange of edge.excludeRanges) {
+			subtractOverviewTotals(
+				totals,
+				await summarizeRawOverview(ctx, {
+					siteId: args.siteId,
+					from: excludedRange.from,
+					to: excludedRange.to,
+				}),
+			);
 		}
 	}
+	const plan = buildExactRangePlan(edgePlan.rollupRange.from, edgePlan.rollupRange.to);
 	for (const hourlyRange of plan.hourlyRanges) {
 		const rows = await queryHourlyRollups(ctx, {
 			siteId: args.siteId,
@@ -519,6 +564,61 @@ async function queryRawEvents(
 	);
 }
 
+async function summarizeRawOverview(
+	ctx: QueryCtx,
+	args: { siteId: IdOfSite; from: number; to: number },
+) {
+	const totals = {
+		count: 0,
+		uniqueVisitorCount: 0,
+		sessionCount: 0,
+		pageviewCount: 0,
+		bounceCount: 0,
+		durationMs: 0,
+	};
+	if (args.from >= args.to) {
+		return totals;
+	}
+	for await (const event of ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
+		q
+			.eq("siteId", args.siteId)
+			.gte("occurredAt", args.from)
+			.lt("occurredAt", args.to),
+	)) {
+		totals.count += 1;
+		totals.pageviewCount += event.eventType === "pageview" ? 1 : 0;
+		totals.sessionCount += event.contributesSession ? 1 : 0;
+		totals.uniqueVisitorCount += event.contributesVisitor ? 1 : 0;
+	}
+	return totals;
+}
+
+async function summarizeRawTopDimension(
+	ctx: QueryCtx,
+	args: { siteId: IdOfSite; from: number; to: number; dimension: string },
+) {
+	const byKey = new Map<string, { count: number; pageviewCount: number }>();
+	if (args.from >= args.to) {
+		return [];
+	}
+	for await (const event of ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
+		q
+			.eq("siteId", args.siteId)
+			.gte("occurredAt", args.from)
+			.lt("occurredAt", args.to),
+	)) {
+		const key = keyForEventDimension(event, args.dimension);
+		if (!key) {
+			continue;
+		}
+		const current = byKey.get(key) ?? { count: 0, pageviewCount: 0 };
+		current.count += 1;
+		current.pageviewCount += event.eventType === "pageview" ? 1 : 0;
+		byKey.set(key, current);
+	}
+	return [...byKey.entries()].map(([key, value]) => ({ key, ...value }));
+}
+
 async function queryDimensionRollups(
 	ctx: QueryCtx,
 	args: {
@@ -546,28 +646,19 @@ async function queryDimensionRollups(
 	);
 }
 
-type PagedQuery<T> = {
-	paginate(args: { numItems: number; cursor: string | null }): Promise<{
-		page: T[];
-		isDone: boolean;
-		continueCursor: string;
-	}>;
-};
+type ScanQuery<T> = AsyncIterable<T>;
 
-async function readAll<T>(createQuery: () => PagedQuery<T>) {
+async function readAll<T>(createQuery: () => ScanQuery<T>) {
 	const rows: T[] = [];
-	let cursor: string | null = null;
-	while (true) {
-		const page = await createQuery().paginate({
-			numItems: scanPageSize,
-			cursor,
-		});
-		rows.push(...(page.page as T[]));
-		if (page.isDone) {
-			return rows;
+	let count = 0;
+	for await (const row of createQuery()) {
+		rows.push(row);
+		count += 1;
+		if (count >= scanPageSize * 1_024) {
+			throw new Error("Query scan exceeded component safety limit");
 		}
-		cursor = page.continueCursor;
 	}
+	return rows;
 }
 
 function buildExactRangePlan(from: number, to: number) {
@@ -592,11 +683,13 @@ function buildExactRangePlan(from: number, to: number) {
 	if (hourlyStart < hourlyEnd) {
 		const firstFullDay = ceilToBucket(hourlyStart, dayMs);
 		const lastFullDay = floorToBucket(hourlyEnd, dayMs);
-		addRange(hourlyRanges, hourlyStart, Math.min(hourlyEnd, firstFullDay));
 		if (firstFullDay < lastFullDay) {
+			addRange(hourlyRanges, hourlyStart, firstFullDay);
 			dailyRange = { from: firstFullDay, to: lastFullDay };
+			addRange(hourlyRanges, lastFullDay, hourlyEnd);
+		} else {
+			addRange(hourlyRanges, hourlyStart, hourlyEnd);
 		}
-		addRange(hourlyRanges, Math.max(hourlyStart, lastFullDay), hourlyEnd);
 	}
 
 	const rawTailStart = Math.max(rawHeadEnd, rawTailStartBase);
@@ -688,6 +781,167 @@ function addTopRows(
 		current.pageviewCount += row.pageviewCount;
 		byKey.set(row.key, current);
 	}
+}
+
+function subtractTopRows(
+	byKey: Map<string, { count: number; pageviewCount: number }>,
+	rows: Array<{ key: string; count: number; pageviewCount: number }>,
+) {
+	for (const row of rows) {
+		const current = byKey.get(row.key);
+		if (!current) {
+			continue;
+		}
+		current.count -= row.count;
+		current.pageviewCount -= row.pageviewCount;
+		if (current.count <= 0 && current.pageviewCount <= 0) {
+			byKey.delete(row.key);
+			continue;
+		}
+		byKey.set(row.key, current);
+	}
+}
+
+function addOverviewTotals(
+	target: {
+		count: number;
+		uniqueVisitorCount: number;
+		sessionCount: number;
+		pageviewCount: number;
+		bounceCount: number;
+		durationMs: number;
+	},
+	source: {
+		count: number;
+		uniqueVisitorCount: number;
+		sessionCount: number;
+		pageviewCount: number;
+		bounceCount: number;
+		durationMs: number;
+	},
+) {
+	target.count += source.count;
+	target.uniqueVisitorCount += source.uniqueVisitorCount;
+	target.sessionCount += source.sessionCount;
+	target.pageviewCount += source.pageviewCount;
+	target.bounceCount += source.bounceCount;
+	target.durationMs += source.durationMs;
+}
+
+function subtractOverviewTotals(
+	target: {
+		count: number;
+		uniqueVisitorCount: number;
+		sessionCount: number;
+		pageviewCount: number;
+		bounceCount: number;
+		durationMs: number;
+	},
+	source: {
+		count: number;
+		uniqueVisitorCount: number;
+		sessionCount: number;
+		pageviewCount: number;
+		bounceCount: number;
+		durationMs: number;
+	},
+) {
+	target.count -= source.count;
+	target.uniqueVisitorCount -= source.uniqueVisitorCount;
+	target.sessionCount -= source.sessionCount;
+	target.pageviewCount -= source.pageviewCount;
+	target.bounceCount -= source.bounceCount;
+	target.durationMs -= source.durationMs;
+}
+
+function buildEdgeHourPlan(from: number, to: number) {
+	const edges: Array<
+		| { kind: "raw"; from: number; to: number }
+		| {
+				kind: "rollup";
+				bucketStart: number;
+				excludeRanges: Array<{ from: number; to: number }>;
+		  }
+	> = [];
+	if (from >= to) {
+		return {
+			edges,
+			rollupRange: { from, to },
+		};
+	}
+
+	const firstBucketStart = floorToBucket(from, hourMs);
+	const firstBucketEnd = firstBucketStart + hourMs;
+	let rollupFrom = from;
+	if (from > firstBucketStart) {
+		const overlapEnd = Math.min(to, firstBucketEnd);
+		edges.push(
+			choosePartialHourStrategy({
+				bucketStart: firstBucketStart,
+				insideFrom: from,
+				insideTo: overlapEnd,
+			}),
+		);
+		rollupFrom = firstBucketEnd;
+	}
+
+	const lastBucketStart = floorToBucket(to - 1, hourMs);
+	let rollupTo = to;
+	if (to < lastBucketStart + hourMs && lastBucketStart >= rollupFrom) {
+		edges.push(
+			choosePartialHourStrategy({
+				bucketStart: lastBucketStart,
+				insideFrom: Math.max(from, lastBucketStart),
+				insideTo: to,
+			}),
+		);
+		rollupTo = lastBucketStart;
+	}
+
+	return {
+		edges,
+		rollupRange:
+			rollupFrom < rollupTo
+				? {
+						from: rollupFrom,
+						to: rollupTo,
+					}
+				: {
+						from: rollupTo,
+						to: rollupTo,
+					},
+	};
+}
+
+function choosePartialHourStrategy(args: {
+	bucketStart: number;
+	insideFrom: number;
+	insideTo: number;
+}) {
+	const bucketEnd = args.bucketStart + hourMs;
+	const insideDuration = Math.max(0, args.insideTo - args.insideFrom);
+	const excludeRanges = [
+		{ from: args.bucketStart, to: args.insideFrom },
+		{ from: args.insideTo, to: bucketEnd },
+	].filter((range) => range.from < range.to);
+	const outsideDuration = excludeRanges.reduce(
+		(sum, range) => sum + range.to - range.from,
+		0,
+	);
+
+	if (insideDuration <= outsideDuration) {
+		return {
+			kind: "raw" as const,
+			from: args.insideFrom,
+			to: args.insideTo,
+		};
+	}
+
+	return {
+		kind: "rollup" as const,
+		bucketStart: args.bucketStart,
+		excludeRanges,
+	};
 }
 
 function serializePropertyValue(value: string | number | boolean | null) {

@@ -51,7 +51,7 @@ const INTERVALS = [
 export function AnalyticsDashboard({ siteId, api, className, style }: AnalyticsDashboardProps) {
   const [rangeIndex, setRangeIndex] = useState(1); // Default to Last 7 Days
   const range = INTERVALS[rangeIndex];
-  
+
   const to = useMemo(() => Date.now(), [rangeIndex]);
   const from = useMemo(() => to - range.value, [to, range.value]);
 
@@ -102,11 +102,11 @@ export function AnalyticsDashboard({ siteId, api, className, style }: AnalyticsD
         gap: 16, 
         marginBottom: 32 
       }}>
-        <StatsCard label="Visitors" value={formatNumber(overview.visitors)} />
-        <StatsCard label="Sessions" value={formatNumber(overview.sessions)} />
-        <StatsCard label="Pageviews" value={formatNumber(overview.pageviews)} />
-        <StatsCard label="Bounce Rate" value={`${(overview.bounceRate * 100).toFixed(1)}%`} />
-        <StatsCard label="Avg. Duration" value={formatDuration(overview.averageSessionDurationMs)} />
+        <StatsCard label="Visitors" value={formatNumber(overview.visitors)} testId="overview-visitors" />
+        <StatsCard label="Sessions" value={formatNumber(overview.sessions)} testId="overview-sessions" />
+        <StatsCard label="Pageviews" value={formatNumber(overview.pageviews)} testId="overview-pageviews" />
+        <StatsCard label="Bounce Rate" value={`${(overview.bounceRate * 100).toFixed(1)}%`} testId="overview-bounce-rate" />
+        <StatsCard label="Avg. Duration" value={formatDuration(overview.averageSessionDurationMs)} testId="overview-average-duration" />
       </div>
 
       <div style={{ 
@@ -191,11 +191,14 @@ function DashboardBox({ title, children }: { title: string, children: React.Reac
   );
 }
 
-function StatsCard({ label, value }: { label: string, value: string }) {
+function StatsCard({ label, value, testId }: { label: string, value: string, testId?: string }) {
   return (
-    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}>
+    <div
+      data-testid={testId}
+      style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: 8, padding: 16 }}
+    >
       <div style={{ fontSize: 13, color: '#6b7280', fontWeight: 500, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 700 }}>{value}</div>
+      <div data-testid={testId ? `${testId}-value` : undefined} style={{ fontSize: 24, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import { AnalyticsDashboard } from "@Abdssamie/convex-analytics/react";
 import { useQuery } from "convex/react";
 import { useMemo, useState, useEffect } from "react";
 import { api } from "../convex/_generated/api";
+import { installAnalyticsLoadHarness } from "./loadHarness";
 
 const writeKey = import.meta.env.VITE_ANALYTICS_WRITE_KEY ?? "write_demo_local";
 
@@ -37,6 +38,13 @@ function App() {
       autoPageviews: true,
     });
   }, []);
+
+  useEffect(() => {
+    installAnalyticsLoadHarness(analytics, {
+      enabled: import.meta.env.VITE_ENABLE_LOAD_HARNESS === "true",
+      endpointPath: "/analytics/ingest",
+    });
+  }, [analytics]);
 
   const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
 
