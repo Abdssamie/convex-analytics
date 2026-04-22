@@ -43,12 +43,26 @@ export const {
 export const setupDefaultSite = mutation({
   args: {},
   handler: async (ctx) => {
+    const writeKeyHash = await hashWriteKey(
+      process.env.ANALYTICS_WRITE_KEY ?? "write_demo_local",
+    );
+    const existing = await ctx.runQuery(
+      components.convexAnalytics.sites.getSiteBySlug,
+      { slug: "default" },
+    );
+    if (existing) {
+      if (existing.writeKeyHash !== writeKeyHash) {
+        await ctx.runMutation(components.convexAnalytics.sites.rotateWriteKey, {
+          siteId: existing._id,
+          writeKeyHash,
+        });
+      }
+      return existing._id;
+    }
     return await ctx.runMutation(components.convexAnalytics.sites.createSite, {
       slug: "default",
       name: "Default site",
-      writeKeyHash: await hashWriteKey(
-        process.env.ANALYTICS_WRITE_KEY ?? "write_demo_local",
-      ),
+      writeKeyHash,
       allowedOrigins: [],
     });
   },

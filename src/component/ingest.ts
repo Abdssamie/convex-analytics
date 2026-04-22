@@ -102,14 +102,49 @@ export const ingestBatch = mutation({
 
 
 		if (insertedEventIds.length > 0) {
-			await ctx.scheduler.runAfter(0, internal.ingest.aggregateEventBatch, {
-				eventIds: insertedEventIds,
+			await ctx.scheduler.runAfter(0, internal.ingest.reducePendingSiteEvents, {
+				siteId: site._id,
 			});
 		}
 
 		return { accepted, rejected };
 	},
 });
+
+export const reducePendingSiteEvents = internalMutation({
+	args: {
+		siteId: v.id("sites"),
+	},
+	returns: v.object({
+		aggregated: v.number(),
+		skipped: v.number(),
+		failed: v.number(),
+		hasMore: v.boolean(),
+	}),
+	handler: async (ctx, args) => {
+		const pendingEvents = await ctx.db
+			.query("events")
+			.withIndex("by_siteId_and_aggregatedAt_and_occurredAt", (q) =>
+				q.eq("siteId", args.siteId).eq("aggregatedAt", null),
+			)
+			.take(aggregationBatchLimit + 1);
+		const eventIds = pendingEvents
+			.slice(0, aggregationBatchLimit)
+			.map((event) => event._id);
+		const result = await aggregateEventsByIds(ctx, eventIds);
+		const hasMore = pendingEvents.length > aggregationBatchLimit;
+		if (hasMore) {
+			await ctx.scheduler.runAfter(0, internal.ingest.reducePendingSiteEvents, {
+				siteId: args.siteId,
+			});
+		}
+		return {
+			...result,
+			hasMore,
+		};
+	},
+});
+
 export const aggregateEventBatch = internalMutation({
 	args: {
 		eventIds: v.array(v.id("events")),
@@ -206,7 +241,7 @@ export async function upsertVisitor(
 		identifiedUserId?: string;
 		traits?: Record<string, string | number | boolean | null>;
 	},
-) {
+	) {
 	const existing = await ctx.db
 		.query("visitors")
 		.withIndex("by_siteId_and_visitorId", (q) =>
@@ -214,8 +249,10 @@ export async function upsertVisitor(
 		)
 		.unique();
 	if (existing) {
+		const firstSeenAt = Math.min(existing.firstSeenAt, args.seenAt);
 		const lastSeenAt = Math.max(existing.lastSeenAt, args.seenAt);
 		await ctx.db.patch(existing._id, {
+			firstSeenAt,
 			lastSeenAt,
 			identifiedUserId: args.identifiedUserId ?? existing.identifiedUserId,
 			traits: args.traits ?? existing.traits,

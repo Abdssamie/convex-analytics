@@ -8,11 +8,40 @@ import { installAnalyticsLoadHarness } from "./loadHarness";
 
 const writeKey = import.meta.env.VITE_ANALYTICS_WRITE_KEY ?? "write_demo_local";
 
+function DashboardView(props: {
+  onBack: () => void;
+}) {
+  const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
+
+  return (
+    <main className="shell">
+      <div style={{ marginBottom: 24, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <button onClick={props.onBack}>← Back to Demo</button>
+        <p style={{ margin: 0, color: "#64748b", fontSize: 14 }}>
+          Connected to site: <strong>{site?.slug ?? "..."}</strong>
+        </p>
+      </div>
+      {site ? (
+        <AnalyticsDashboard siteId={site._id} api={api.example} />
+      ) : site === null ? (
+        <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
+          Run <code>npx convex run example:setupDefaultSite</code> once.
+        </div>
+      ) : (
+        <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
+          Loading site configuration...
+        </div>
+      )}
+    </main>
+  );
+}
+
 function App() {
   const [path, setPath] = useState(window.location.pathname);
   const [plan, setPlan] = useState<"starter" | "pro">("starter");
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState("No event sent yet.");
+  const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
 
   // Handle browser back/forward buttons
   useEffect(() => {
@@ -46,8 +75,6 @@ function App() {
     });
   }, [analytics]);
 
-  const site = useQuery(api.example.getSiteBySlug, { slug: "default" });
-
   function selectPlan(nextPlan: "starter" | "pro") {
     setPlan(nextPlan);
     analytics.track("plan_selected", { plan: nextPlan });
@@ -69,27 +96,7 @@ function App() {
   }
 
   if (path === "/dashboard") {
-    return (
-      <main className="shell">
-        <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button onClick={() => navigate("/")}>← Back to Demo</button>
-          <p style={{ margin: 0, color: '#64748b', fontSize: 14 }}>
-            Connected to site: <strong>{site?.slug ?? '...'}</strong>
-          </p>
-        </div>
-        {site ? (
-          <AnalyticsDashboard siteId={site._id} api={api.example} />
-        ) : site === null ? (
-          <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
-            Run <code>npx convex run example:setupDefaultSite</code> once.
-          </div>
-        ) : (
-          <div style={{ padding: 48, textAlign: "center", color: "#64748b" }}>
-            Loading site configuration...
-          </div>
-        )}
-      </main>
-    );
+    return <DashboardView onBack={() => navigate("/")} />;
   }
 
   return (
