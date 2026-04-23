@@ -70,14 +70,27 @@ type Page = "overview" | "pageviews" | "events" | "visitors" | "sessions";
 // ---------------------------------------------------------------------------
 
 const INTERVALS = [
-  { label: "Last 24h", ms: 24 * 60 * 60 * 1000, interval: "hour" as const },
   {
-    label: "Last 7 days",
+    key: "24h",
+    label: "24h",
+    longLabel: "Rolling 24 hours",
+    description: "Hourly buckets",
+    ms: 24 * 60 * 60 * 1000,
+    interval: "hour" as const,
+  },
+  {
+    key: "7d",
+    label: "7d",
+    longLabel: "Rolling 7 days",
+    description: "Daily buckets",
     ms: 7 * 24 * 60 * 60 * 1000,
     interval: "day" as const,
   },
   {
-    label: "Last 30 days",
+    key: "30d",
+    label: "30d",
+    longLabel: "Rolling 30 days",
+    description: "Daily buckets",
     ms: 30 * 24 * 60 * 60 * 1000,
     interval: "day" as const,
   },
@@ -100,6 +113,10 @@ function formatDuration(ms: number): string {
   return `${s}s`;
 }
 
+function formatPercent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
 function formatDate(ts: number, interval: "hour" | "day"): string {
   const d = new Date(ts);
   if (interval === "hour") {
@@ -108,8 +125,8 @@ function formatDate(ts: number, interval: "hour" | "day"): string {
   return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function truncate(s: string, n: number): string {
-  return s.length > n ? s.slice(0, n) + "…" : s;
+function safeDivide(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : numerator / denominator;
 }
 
 // ---------------------------------------------------------------------------
@@ -117,22 +134,174 @@ function truncate(s: string, n: number): string {
 // ---------------------------------------------------------------------------
 
 const S = {
-  sidebarBg: "#0f172a",
-  sidebarActiveBg: "#1e293b",
-  sidebarActiveBorder: "#0d9488",
-  sidebarActiveText: "#f1f5f9",
-  sidebarText: "#94a3b8",
-  contentBg: "#f1f5f9",
+  sidebarBg: "#101828",
+  sidebarActiveBg: "#182334",
+  sidebarActiveBorder: "#0f766e",
+  sidebarActiveText: "#f8fafc",
+  sidebarText: "#93a4ba",
+  contentBg: "#eef2f6",
   card: "#ffffff",
-  border: "#e2e8f0",
-  textPri: "#0f172a",
-  textSec: "#64748b",
-  textMut: "#94a3b8",
-  teal: "#0d9488",
+  border: "#d7e0ea",
+  textPri: "#102033",
+  textSec: "#5f7187",
+  textMut: "#90a0b5",
+  teal: "#0f766e",
   amber: "#fffbeb",
   amberBdr: "#fef3c7",
   amberText: "#92400e",
+  greenStrong: "#0f766e",
+  greenDeep: "#115e59",
+  greenSoft: "#e7f7f5",
+  greenSoftAlt: "#f0fbf8",
+  slateWash: "#f6f8fb",
+  shadow: "0 20px 60px rgba(16, 32, 51, 0.08)",
 } as const;
+
+const METRIC_META: Record<
+  Extract<keyof TimeseriesPoint, "visitors" | "sessions" | "pageviews" | "events">,
+  { label: string; color: string; emptyLabel: string; tint: string; icon: React.ReactNode }
+> = {
+  visitors: {
+    label: "New visitors",
+    color: S.greenStrong,
+    tint: S.greenSoft,
+    emptyLabel: "No new visitors in this window.",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="5.5" r="2.5" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M2.5 13c.7-2 2.8-3.5 5.5-3.5S12.8 11 13.5 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  sessions: {
+    label: "Sessions",
+    color: S.greenDeep,
+    tint: S.greenSoftAlt,
+    emptyLabel: "No sessions in this window.",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M8 5.25v3.2l2.15 1.35" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  pageviews: {
+    label: "Pageviews",
+    color: S.greenStrong,
+    tint: S.greenSoftAlt,
+    emptyLabel: "No pageviews in this window.",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M5 6.5h6M5 9h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  events: {
+    label: "Events",
+    color: S.greenDeep,
+    tint: S.greenSoft,
+    emptyLabel: "No events in this window.",
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M8.7 1.7 3 8.4h4.2L6.4 14.3 13 7.5H8.8l-.1-5.8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+};
+
+const STAT_META: Record<
+  keyof OverviewStats,
+  { icon: React.ReactNode; color: string; tint: string; label?: string }
+> = {
+  visitors: { icon: METRIC_META.visitors.icon, color: S.greenStrong, tint: S.greenSoft },
+  sessions: { icon: METRIC_META.sessions.icon, color: S.greenDeep, tint: S.greenSoftAlt },
+  pageviews: { icon: METRIC_META.pageviews.icon, color: S.greenStrong, tint: S.greenSoftAlt },
+  events: { icon: METRIC_META.events.icon, color: S.greenDeep, tint: S.greenSoft },
+  bounceRate: {
+    color: S.greenDeep,
+    tint: S.greenSoftAlt,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <path d="M3 4.5h10M3 8h6m-6 3.5h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <path d="m10 10.5 3 3m0-3-3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  averageSessionDurationMs: {
+    color: S.greenStrong,
+    tint: S.greenSoft,
+    icon: (
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.5" />
+        <path d="M8 4.8V8l2.3 1.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+};
+
+const SECTION_ICONS: Record<string, React.ReactNode> = {
+  Trend: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M2 10.5 5.2 7.3l2.1 2L12 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  "Top Pages": METRIC_META.pageviews.icon,
+  "Top Sources": (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.8 5.6h8.4M2.8 8.4h8.4M7 2c1 1.1 1.6 2.9 1.6 5S8 10.9 7 12M7 2C6 3.1 5.4 4.9 5.4 7s.6 3.9 1.6 5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  ),
+  "Pageviews over time": METRIC_META.pageviews.icon,
+  "Pageview Feed": METRIC_META.pageviews.icon,
+  "Top Referrers": (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M8.5 2.5h3v3M11.2 2.8 7.4 6.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5.5 3H4a1.5 1.5 0 0 0-1.5 1.5V10A1.5 1.5 0 0 0 4 11.5h5.5A1.5 1.5 0 0 0 11 10V8.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  "Top Events": METRIC_META.events.icon,
+  "Top Mediums": (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="2.5" y="3" width="9" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M4.5 5.5h5M4.5 8h3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  "Top Campaigns": (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="m2.5 8.5 5-5 4 4-5 5H2.5v-4Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="m7.4 3.6 3 3" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  ),
+  "Raw Event Feed": METRIC_META.events.icon,
+  Countries: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.8 5.6h8.4M2.8 8.4h8.4M7 2c1 1.1 1.6 2.9 1.6 5S8 10.9 7 12M7 2C6 3.1 5.4 4.9 5.4 7s.6 3.9 1.6 5" stroke="currentColor" strokeWidth="1.2" />
+    </svg>
+  ),
+  Browsers: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M2.6 5.4h8.8M6.8 2.2c-1 1.3-1.8 3.2-1.8 4.8 0 1.7.8 3.5 1.8 4.8M7.2 2.2C8.2 3.5 9 5.3 9 7c0 1.6-.8 3.5-1.8 4.8" stroke="currentColor" strokeWidth="1.1" />
+    </svg>
+  ),
+  Devices: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <rect x="4.2" y="1.8" width="5.6" height="10.4" rx="1.4" stroke="currentColor" strokeWidth="1.5" />
+      <circle cx="7" cy="10.2" r=".7" fill="currentColor" />
+    </svg>
+  ),
+  OS: (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M2.5 3.5h9v7h-9z" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M5 10.8h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  ),
+  Visitors: METRIC_META.visitors.icon,
+  Sessions: METRIC_META.sessions.icon,
+};
 
 // ---------------------------------------------------------------------------
 // Main component
@@ -231,6 +400,7 @@ export function AnalyticsDashboard({
     visitors: "Visitors",
     sessions: "Sessions",
   };
+  const activeNav = NAV.find((item) => item.id === page);
 
   return (
     <div
@@ -240,7 +410,7 @@ export function AnalyticsDashboard({
         height: "100vh",
         overflow: "hidden",
         fontFamily:
-          '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+          '"Manrope", "Avenir Next", "Segoe UI", Helvetica, Arial, sans-serif',
         color: S.textPri,
         ...style,
       }}
@@ -261,39 +431,77 @@ export function AnalyticsDashboard({
         {/* Top bar */}
         <div
           style={{
-            height: 56,
-            background: S.card,
+            minHeight: 72,
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.88) 100%)",
             borderBottom: `1px solid ${S.border}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
             padding: "0 24px",
             flexShrink: 0,
+            backdropFilter: "blur(10px)",
           }}
         >
-          <span style={{ fontSize: 16, fontWeight: 600 }}>
-            {PAGE_LABELS[page]}
-          </span>
-          <select
-            value={rangeIdx}
-            onChange={(e) => setRangeIdx(parseInt(e.target.value))}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 12,
+                background: S.slateWash,
+                color: activeNav ? S.teal : S.textSec,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `1px solid ${S.border}`,
+              }}
+            >
+              {activeNav?.icon}
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{PAGE_LABELS[page]}</div>
+              <div style={{ fontSize: 12, color: S.textMut, marginTop: 2 }}>
+                Rolling window, refreshed each minute
+              </div>
+            </div>
+          </div>
+          <div
             style={{
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: `1px solid ${S.border}`,
-              background: S.card,
-              color: S.textPri,
-              fontSize: 13,
-              cursor: "pointer",
-              outline: "none",
+              display: "inline-flex",
+              padding: 5,
+              gap: 5,
+              background: "#dde7f0",
+              borderRadius: 14,
+              border: "1px solid rgba(255,255,255,0.7)",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.7)",
             }}
           >
             {INTERVALS.map((iv, i) => (
-              <option key={iv.label} value={i}>
+              <button
+                key={iv.key}
+                onClick={() => setRangeIdx(i)}
+                title={`${iv.longLabel} (${iv.description})`}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "8px 12px",
+                  background:
+                    i === rangeIdx
+                      ? "linear-gradient(180deg, #ffffff 0%, #f8fbfd 100%)"
+                      : "transparent",
+                  color: i === rangeIdx ? S.greenDeep : S.textSec,
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  boxShadow:
+                    i === rangeIdx ? "0 8px 18px rgba(15, 118, 110, 0.12)" : "none",
+                }}
+              >
                 {iv.label}
-              </option>
+              </button>
             ))}
-          </select>
+          </div>
         </div>
 
         {/* Scrollable content */}
@@ -487,7 +695,8 @@ function Sidebar({
       style={{
         width: 220,
         flexShrink: 0,
-        background: S.sidebarBg,
+        background:
+          "linear-gradient(180deg, #101828 0%, #132033 55%, #10243a 100%)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -501,7 +710,7 @@ function Sidebar({
           alignItems: "center",
           padding: "0 20px",
           gap: 10,
-          borderBottom: "1px solid #1e293b",
+          borderBottom: "1px solid rgba(255,255,255,0.08)",
           flexShrink: 0,
         }}
       >
@@ -509,12 +718,13 @@ function Sidebar({
           style={{
             width: 28,
             height: 28,
-            borderRadius: 6,
-            background: S.teal,
+            borderRadius: 10,
+            background: "linear-gradient(135deg, #0f766e 0%, #155e75 100%)",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             flexShrink: 0,
+            boxShadow: "0 10px 24px rgba(15,118,110,0.3)",
           }}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -545,8 +755,8 @@ function Sidebar({
         style={{
           padding: "14px 20px",
           fontSize: 11,
-          color: "#334155",
-          borderTop: "1px solid #1e293b",
+          color: "#6f8098",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
         }}
       >
         Powered by Convex Analytics
@@ -588,6 +798,7 @@ function NavItem({
         fontSize: 14,
         fontWeight: active ? 600 : 400,
         textAlign: "left",
+        transition: "background 120ms ease, color 120ms ease, border-color 120ms ease",
       }}
     >
       <span
@@ -623,8 +834,9 @@ function Card({
       style={{
         background: S.card,
         border: `1px solid ${S.border}`,
-        borderRadius: 10,
+        borderRadius: 18,
         padding: "20px 24px",
+        boxShadow: S.shadow,
         ...style,
       }}
     >
@@ -633,18 +845,44 @@ function Card({
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
+function SectionTitle({
+  children,
+  icon,
+}: {
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+}) {
   return (
     <div
       style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: 700,
         color: S.textSec,
         textTransform: "uppercase",
-        letterSpacing: "0.06em",
+        letterSpacing: "0.08em",
         marginBottom: 14,
       }}
     >
+      {icon ? (
+        <span
+          style={{
+            width: 18,
+            height: 18,
+            borderRadius: 999,
+            background: S.slateWash,
+            color: S.greenDeep,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            border: `1px solid ${S.border}`,
+          }}
+        >
+          {icon}
+        </span>
+      ) : null}
       {children}
     </div>
   );
@@ -654,24 +892,63 @@ function StatCard({
   label,
   value,
   sub,
+  icon,
+  iconColor = S.teal,
+  iconTint = S.greenSoft,
   testId,
 }: {
   label: string;
   value: string | undefined;
   sub?: string;
+  icon?: React.ReactNode;
+  iconColor?: string;
+  iconTint?: string;
   testId?: string;
 }) {
   return (
-    <Card style={{ padding: "18px 20px" }}>
+    <Card
+      style={{
+        padding: "18px 20px",
+        background:
+          "linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(248,250,252,0.92) 100%)",
+      }}
+    >
       <div
         style={{
-          fontSize: 12,
-          color: S.textSec,
-          fontWeight: 500,
-          marginBottom: 6,
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 10,
         }}
       >
-        {label}
+        <div
+          style={{
+            fontSize: 12,
+            color: S.textSec,
+            fontWeight: 600,
+            letterSpacing: "0.01em",
+          }}
+        >
+          {label}
+        </div>
+        {icon ? (
+          <div
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: 12,
+              background: iconTint,
+              color: iconColor,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {icon}
+          </div>
+        ) : null}
       </div>
       <div
         data-testid={testId}
@@ -732,16 +1009,19 @@ function TopList({
   data,
   barColor = S.teal,
   metric = "count",
+  emptyLabel = "No data for this period.",
 }: {
   title: string;
   data: TopRow[] | undefined;
   barColor?: string;
   metric?: "count" | "pageviewCount";
+  emptyLabel?: string;
 }) {
   const max = data ? Math.max(...data.map((d) => d[metric]), 1) : 1;
+  const total = data?.reduce((sum, item) => sum + item[metric], 0) ?? 0;
   return (
     <Card>
-      <SectionTitle>{title}</SectionTitle>
+      <SectionTitle icon={SECTION_ICONS[title]}>{title}</SectionTitle>
       {data === undefined ? (
         <>
           <SkeletonRow />
@@ -749,9 +1029,7 @@ function TopList({
           <SkeletonRow />
         </>
       ) : data.length === 0 ? (
-        <div style={{ color: S.textMut, fontSize: 13 }}>
-          No data for this period.
-        </div>
+        <div style={{ color: S.textMut, fontSize: 13 }}>{emptyLabel}</div>
       ) : (
         data.map((item) => (
           <div key={item.key} style={{ marginBottom: 10 }}>
@@ -782,9 +1060,11 @@ function TopList({
                   color: S.textSec,
                   flexShrink: 0,
                   fontSize: 12,
+                  textAlign: "right",
                 }}
               >
                 {formatNumber(item[metric])}
+                {total > 0 ? ` · ${formatPercent(item[metric] / total)}` : ""}
               </span>
             </div>
             <div
@@ -859,39 +1139,51 @@ function LoadMoreBtn({
 
 const thSty: React.CSSProperties = {
   textAlign: "left",
-  padding: "8px 12px",
+  padding: "10px 12px",
   fontSize: 12,
-  fontWeight: 600,
+  fontWeight: 700,
   color: S.textSec,
   whiteSpace: "nowrap",
   borderBottom: `1px solid ${S.border}`,
-  background: "#f8fafc",
+  background: S.slateWash,
 };
 
 const tdSty: React.CSSProperties = {
-  padding: "9px 12px",
+  padding: "11px 12px",
   fontSize: 13,
   color: S.textPri,
   verticalAlign: "middle",
   borderBottom: `1px solid ${S.border}`,
 };
 
+const tableWrapSty: React.CSSProperties = {
+  overflowX: "auto",
+};
+
+const tableSty: React.CSSProperties = {
+  width: "100%",
+  minWidth: "max-content",
+  borderCollapse: "collapse",
+};
+
 // ---------------------------------------------------------------------------
-// Bar Chart  (robust: handles 0, 1, or many data points; no distortion bugs)
+// Trend Chart
 // ---------------------------------------------------------------------------
 
-function BarChart({
+function TrendChart({
   data,
   metric,
   color,
-  height = 140,
+  height = 220,
   interval,
+  emptyLabel,
 }: {
   data: TimeseriesPoint[];
-  metric: keyof TimeseriesPoint;
+  metric: Extract<keyof TimeseriesPoint, "visitors" | "sessions" | "pageviews" | "events">;
   color: string;
   height?: number;
   interval: "hour" | "day";
+  emptyLabel?: string;
 }) {
   if (!data || data.length === 0) {
     return (
@@ -905,38 +1197,55 @@ function BarChart({
           fontSize: 13,
         }}
       >
-        No data
+        {emptyLabel ?? "No data"}
       </div>
     );
   }
 
-  const W = 600;
+  const W = 760;
   const H = height;
-  const PAD = { top: 20, right: 8, bottom: 26, left: 44 };
+  const PAD = { top: 20, right: 14, bottom: 34, left: 50 };
   const chartW = W - PAD.left - PAD.right;
   const chartH = H - PAD.top - PAD.bottom;
 
   const values = data.map((d) => d[metric] as number);
   const maxVal = Math.max(...values, 1);
-
   const n = data.length;
-  // Each bar occupies an equal slot; bar width is 65% of that slot
-  const slotW = chartW / Math.max(n, 1);
-  const barW = Math.max(2, slotW * 0.65);
-
-  // X-axis label positions: first, middle, last
-  const labelIdxs = Array.from(new Set([0, Math.floor((n - 1) / 2), n - 1]));
+  const baselineY = PAD.top + chartH;
+  const stepX = n > 1 ? chartW / (n - 1) : 0;
+  const points = data.map((point, index) => {
+    const value = point[metric] as number;
+    const x = n === 1 ? PAD.left + chartW / 2 : PAD.left + index * stepX;
+    const y = baselineY - (value / maxVal) * chartH;
+    return { x, y, value, bucketStart: point.bucketStart };
+  });
+  const linePath = points
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
+  const areaPath = [
+    `M ${points[0]?.x ?? PAD.left} ${baselineY}`,
+    ...points.map((point) => `L ${point.x} ${point.y}`),
+    `L ${points[points.length - 1]?.x ?? PAD.left} ${baselineY}`,
+    "Z",
+  ].join(" ");
+  const labelIdxs = Array.from(
+    new Set([0, Math.floor((n - 1) / 3), Math.floor(((n - 1) * 2) / 3), n - 1]),
+  );
+  const ticks = [0, 0.5, 1];
 
   return (
-    // Fixed viewBox + width/height — no preserveAspectRatio="none" distortion
     <svg
       viewBox={`0 0 ${W} ${H}`}
       width="100%"
       height={height}
-      style={{ display: "block" }}
+      style={{
+        display: "block",
+        background:
+          "linear-gradient(180deg, rgba(246,248,251,0.7) 0%, rgba(255,255,255,0.2) 100%)",
+        borderRadius: 16,
+      }}
     >
-      {/* Horizontal grid lines */}
-      {[0, 0.5, 1].map((f) => {
+      {ticks.map((f) => {
         const y = PAD.top + chartH * (1 - f);
         return (
           <line
@@ -951,56 +1260,53 @@ function BarChart({
         );
       })}
 
-      {/* Y-axis max label */}
-      <text
-        x={PAD.left - 6}
-        y={PAD.top + 4}
-        textAnchor="end"
-        fontSize="10"
-        fill={S.textMut}
-      >
-        {formatNumber(maxVal)}
-      </text>
-      <text
-        x={PAD.left - 6}
-        y={PAD.top + chartH / 2 + 4}
-        textAnchor="end"
-        fontSize="10"
-        fill={S.textMut}
-      >
-        {formatNumber(maxVal / 2)}
-      </text>
-
-      {/* Bars */}
-      {data.map((d, i) => {
-        const val = d[metric] as number;
-        // Minimum bar height of 2px so zero values are still visible as a thin line
-        const barH = val > 0 ? Math.max(2, (val / maxVal) * chartH) : 0;
-        const x = PAD.left + i * slotW + (slotW - barW) / 2;
-        const y = PAD.top + chartH - barH;
+      {ticks.map((f) => {
+        const value = maxVal * f;
+        const y = PAD.top + chartH * (1 - f) + 4;
         return (
-          <rect
-            key={i}
-            x={x}
+          <text
+            key={f}
+            x={PAD.left - 8}
             y={y}
-            width={barW}
-            height={barH}
-            fill={color}
-            rx="2"
-            opacity="0.82"
+            textAnchor="end"
+            fontSize="10"
+            fill={S.textMut}
           >
-            <title>
-              {formatDate(d.bucketStart, interval)}: {formatNumber(val)}
-            </title>
-          </rect>
+            {formatNumber(value)}
+          </text>
         );
       })}
 
-      {/* X-axis date labels */}
+      <path d={areaPath} fill={color} opacity="0.14" />
+      <path
+        d={linePath}
+        fill="none"
+        stroke={color}
+        strokeWidth="3"
+        strokeLinejoin="round"
+        strokeLinecap="round"
+      />
+
+      {points.map((point, index) => (
+        <circle
+          key={index}
+          cx={point.x}
+          cy={point.y}
+          r={n <= 2 ? 4 : 3}
+          fill={S.card}
+          stroke={color}
+          strokeWidth="2"
+        >
+          <title>
+            {formatDate(point.bucketStart, interval)}: {formatNumber(point.value)}
+          </title>
+        </circle>
+      ))}
+
       {labelIdxs.map((i) => (
         <text
           key={i}
-          x={PAD.left + i * slotW + slotW / 2}
+          x={points[i]?.x ?? PAD.left}
           y={H - 4}
           textAnchor="middle"
           fontSize="10"
@@ -1025,6 +1331,29 @@ function OverviewPage({
   range: (typeof INTERVALS)[number];
 }) {
   const ov = summary?.overview;
+  const [metric, setMetric] = useState<
+    Extract<keyof TimeseriesPoint, "visitors" | "sessions" | "pageviews" | "events">
+  >("visitors");
+  const metricMeta = METRIC_META[metric];
+  const series = summary?.timeseries ?? [];
+  const metricTotal = ov ? ov[metric] : undefined;
+  const averagePerBucket =
+    metricTotal !== undefined && series.length > 0
+      ? metricTotal / series.length
+      : undefined;
+  const peakBucket = series.reduce<TimeseriesPoint | null>((best, point) => {
+    if (!best) {
+      return point;
+    }
+    return point[metric] > best[metric] ? point : best;
+  }, null);
+  const pagesPerSession = ov
+    ? safeDivide(ov.pageviews, ov.sessions)
+    : undefined;
+  const eventsPerSession = ov ? safeDivide(ov.events, ov.sessions) : undefined;
+  const sessionsPerVisitor = ov
+    ? safeDivide(ov.sessions, ov.visitors)
+    : undefined;
   return (
     <>
       {/* Stat row */}
@@ -1037,58 +1366,169 @@ function OverviewPage({
         }}
       >
         <StatCard
-          label="Visitors"
+          label="New Visitors"
           value={ov ? formatNumber(ov.visitors) : undefined}
+          icon={STAT_META.visitors.icon}
+          iconColor={STAT_META.visitors.color}
+          iconTint={STAT_META.visitors.tint}
           testId="overview-visitors"
         />
         <StatCard
           label="Sessions"
           value={ov ? formatNumber(ov.sessions) : undefined}
+          icon={STAT_META.sessions.icon}
+          iconColor={STAT_META.sessions.color}
+          iconTint={STAT_META.sessions.tint}
           testId="overview-sessions"
         />
         <StatCard
           label="Pageviews"
           value={ov ? formatNumber(ov.pageviews) : undefined}
+          icon={STAT_META.pageviews.icon}
+          iconColor={STAT_META.pageviews.color}
+          iconTint={STAT_META.pageviews.tint}
           testId="overview-pageviews"
         />
         <StatCard
           label="Events"
           value={ov ? formatNumber(ov.events) : undefined}
+          icon={STAT_META.events.icon}
+          iconColor={STAT_META.events.color}
+          iconTint={STAT_META.events.tint}
         />
         <StatCard
           label="Bounce Rate"
-          value={ov ? `${(ov.bounceRate * 100).toFixed(1)}%` : undefined}
+          value={ov ? formatPercent(ov.bounceRate) : undefined}
+          icon={STAT_META.bounceRate.icon}
+          iconColor={STAT_META.bounceRate.color}
+          iconTint={STAT_META.bounceRate.tint}
           testId="overview-bounce-rate"
         />
         <StatCard
           label="Avg Duration"
           value={ov ? formatDuration(ov.averageSessionDurationMs) : undefined}
+          icon={STAT_META.averageSessionDurationMs.icon}
+          iconColor={STAT_META.averageSessionDurationMs.color}
+          iconTint={STAT_META.averageSessionDurationMs.tint}
           testId="overview-average-duration"
         />
       </div>
 
-      {/* Chart */}
       <Card style={{ marginBottom: 24 }}>
-        <SectionTitle>Visitors over time</SectionTitle>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 16,
+            flexWrap: "wrap",
+            marginBottom: 18,
+          }}
+        >
+          <div>
+            <SectionTitle icon={SECTION_ICONS.Trend}>Trend</SectionTitle>
+            <div style={{ fontSize: 24, fontWeight: 800, color: S.textPri }}>
+              {metricMeta.label}
+            </div>
+            <div style={{ fontSize: 13, color: S.textSec, marginTop: 6 }}>
+              Total {metricTotal === undefined ? "—" : formatNumber(metricTotal)} · Avg/bucket{" "}
+              {averagePerBucket === undefined ? "—" : formatNumber(averagePerBucket)} · Peak{" "}
+              {peakBucket
+                ? `${formatNumber(peakBucket[metric])} at ${formatDate(peakBucket.bucketStart, range.interval)}`
+                : "—"}
+            </div>
+          </div>
+          <div
+            style={{
+              display: "inline-flex",
+              padding: 4,
+              gap: 4,
+              background: "#f8fafc",
+              borderRadius: 10,
+              border: `1px solid ${S.border}`,
+              alignSelf: "flex-start",
+              flexWrap: "wrap",
+            }}
+          >
+            {(Object.keys(METRIC_META) as Array<keyof typeof METRIC_META>).map((key) => (
+              <button
+                key={key}
+                onClick={() => setMetric(key)}
+                style={{
+                  border: "none",
+                  borderRadius: 10,
+                  padding: "8px 10px",
+                  background: metric === key ? METRIC_META[key].tint : "transparent",
+                  color: metric === key ? METRIC_META[key].color : S.textSec,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 7,
+                }}
+              >
+                <span style={{ display: "inline-flex" }}>{METRIC_META[key].icon}</span>
+                {METRIC_META[key].label}
+              </button>
+            ))}
+          </div>
+        </div>
         {summary ? (
-          <BarChart
+          <TrendChart
             data={summary.timeseries}
-            metric="visitors"
-            color="#6366f1"
+            metric={metric}
+            color={metricMeta.color}
             interval={range.interval}
+            emptyLabel={metricMeta.emptyLabel}
           />
         ) : (
           <div
             style={{
-              height: 140,
+              height: 220,
               background: "#f8fafc",
               borderRadius: 6,
             }}
           />
         )}
+        <div style={{ fontSize: 12, color: S.textMut, marginTop: 12 }}>
+          24h uses hourly buckets. 7d and 30d use daily buckets for stable trend reading.
+        </div>
       </Card>
 
-      {/* Top Pages + Top Sources */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+          gap: 16,
+          marginBottom: 24,
+        }}
+      >
+        <StatCard
+          label="Pages / Session"
+          value={pagesPerSession === undefined ? undefined : pagesPerSession.toFixed(2)}
+          sub="Pageview depth"
+          icon={METRIC_META.pageviews.icon}
+          iconColor={S.greenStrong}
+          iconTint={S.greenSoftAlt}
+        />
+        <StatCard
+          label="Events / Session"
+          value={eventsPerSession === undefined ? undefined : eventsPerSession.toFixed(2)}
+          sub="Interaction density"
+          icon={METRIC_META.events.icon}
+          iconColor={S.greenDeep}
+          iconTint={S.greenSoft}
+        />
+        <StatCard
+          label="Sessions / New Visitor"
+          value={sessionsPerVisitor === undefined ? undefined : sessionsPerVisitor.toFixed(2)}
+          sub="Repeat usage inside window"
+          icon={METRIC_META.sessions.icon}
+          iconColor={S.greenDeep}
+          iconTint={S.greenSoftAlt}
+        />
+      </div>
+
       <div
         style={{
           display: "grid",
@@ -1097,7 +1537,7 @@ function OverviewPage({
         }}
       >
         <TopList title="Top Pages" data={summary?.topPages} />
-        <TopList title="Top Sources" data={summary?.topSources} />
+        <TopList title="Top Sources" data={summary?.topSources} barColor={S.greenStrong} />
       </div>
     </>
   );
@@ -1129,13 +1569,16 @@ function PageViewsPage({
   return (
     <>
       <Card style={{ marginBottom: 24 }}>
-        <SectionTitle>Pageviews over time</SectionTitle>
+        <SectionTitle icon={SECTION_ICONS["Pageviews over time"]}>
+          Pageviews over time
+        </SectionTitle>
         {timeseries ? (
-          <BarChart
+          <TrendChart
             data={timeseries}
             metric="pageviews"
-            color="#0ea5e9"
+            color={S.greenStrong}
             interval={range.interval}
+            emptyLabel="No pageviews in this window."
           />
         ) : (
           <div
@@ -1155,10 +1598,10 @@ function PageViewsPage({
         <TopList
           title="Top Pages"
           data={topPages}
-          barColor="#0ea5e9"
+          barColor={S.greenStrong}
           metric="pageviewCount"
         />
-        <TopList title="Top Referrers" data={topReferrers} barColor="#0ea5e9" />
+        <TopList title="Top Referrers" data={topReferrers} barColor={S.greenStrong} />
       </div>
 
       <PageviewsFeed siteId={siteId} api={api} from={from} to={to} />
@@ -1182,20 +1625,22 @@ function PageviewsFeed({
     { siteId, from, to },
     { initialNumItems: 25 },
   );
+  const hasExitPath = results.some((ev: any) => Boolean(ev.exitPath));
   return (
     <Card>
-      <SectionTitle>Pageview Feed</SectionTitle>
+      <SectionTitle icon={SECTION_ICONS["Pageview Feed"]}>Pageview Feed</SectionTitle>
       {results.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No pageviews in this period.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={tableWrapSty}>
+          <table style={tableSty}>
             <thead>
               <tr>
                 <th style={thSty}>Path</th>
                 <th style={thSty}>Title</th>
+                {hasExitPath ? <th style={thSty}>Exit Path</th> : null}
                 <th style={thSty}>Visitor</th>
                 <th style={{ ...thSty, textAlign: "right" }}>Occurred</th>
               </tr>
@@ -1203,18 +1648,30 @@ function PageviewsFeed({
             <tbody>
               {results.map((ev: any) => (
                 <tr key={ev._id}>
-                  <td style={tdSty}>{truncate(ev.path ?? "/", 60)}</td>
-                  <td style={{ ...tdSty, color: S.textSec }}>
-                    {truncate(ev.title ?? "", 40)}
+                  <td style={tdSty} title={ev.path ?? "/"}>
+                    {ev.path ?? "/"}
                   </td>
+                  <td style={{ ...tdSty, color: S.textSec }} title={ev.title ?? ""}>
+                    {ev.title ?? ""}
+                  </td>
+                  {hasExitPath ? (
+                    <td
+                      style={{ ...tdSty, color: S.textSec }}
+                      title={ev.exitPath ?? ""}
+                    >
+                      {ev.exitPath ?? ""}
+                    </td>
+                  ) : null}
                   <td
                     style={{
                       ...tdSty,
                       fontFamily: "monospace",
                       color: S.textSec,
+                      whiteSpace: "nowrap",
                     }}
+                    title={ev.visitorId}
                   >
-                    {truncate(ev.visitorId, 8)}
+                    {ev.visitorId}
                   </td>
                   <td
                     style={{
@@ -1268,9 +1725,9 @@ function EventsPage({
           marginBottom: 24,
         }}
       >
-        <TopList title="Top Events" data={topEvents} barColor="#f59e0b" />
-        <TopList title="Top Mediums" data={topMediums} barColor="#f59e0b" />
-        <TopList title="Top Campaigns" data={topCampaigns} barColor="#f59e0b" />
+        <TopList title="Top Events" data={topEvents} barColor={S.greenStrong} />
+        <TopList title="Top Mediums" data={topMediums} barColor={S.greenStrong} />
+        <TopList title="Top Campaigns" data={topCampaigns} barColor={S.greenStrong} />
       </div>
       <RawEventsFeed siteId={siteId} api={api} from={from} to={to} />
     </>
@@ -1296,9 +1753,9 @@ function RawEventsFeed({
 
   const badge = (type: string) => {
     const map: Record<string, [string, string]> = {
-      pageview: ["#dbeafe", "#1d4ed8"],
-      track: ["#ede9fe", "#6d28d9"],
-      identify: ["#d1fae5", "#065f46"],
+      pageview: [S.greenSoftAlt, S.greenDeep],
+      track: [S.greenSoft, S.greenStrong],
+      identify: [S.greenSoftAlt, S.greenDeep],
     };
     const [bg, fg] = map[type] ?? ["#f1f5f9", S.textSec];
     return (
@@ -1321,14 +1778,14 @@ function RawEventsFeed({
 
   return (
     <Card>
-      <SectionTitle>Raw Event Feed</SectionTitle>
+      <SectionTitle icon={SECTION_ICONS["Raw Event Feed"]}>Raw Event Feed</SectionTitle>
       {results.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No events in this period.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={tableWrapSty}>
+          <table style={tableSty}>
             <thead>
               <tr>
                 <th style={thSty}>Event</th>
@@ -1343,17 +1800,19 @@ function RawEventsFeed({
                 <tr key={ev._id}>
                   <td style={{ ...tdSty, fontWeight: 500 }}>{ev.eventName}</td>
                   <td style={tdSty}>{badge(ev.eventType)}</td>
-                  <td style={{ ...tdSty, color: S.textSec }}>
-                    {truncate(ev.path ?? "", 40)}
+                  <td style={{ ...tdSty, color: S.textSec }} title={ev.path ?? ""}>
+                    {ev.path ?? ""}
                   </td>
                   <td
                     style={{
                       ...tdSty,
                       fontFamily: "monospace",
                       color: S.textSec,
+                      whiteSpace: "nowrap",
                     }}
+                    title={ev.visitorId}
                   >
-                    {truncate(ev.visitorId, 8)}
+                    {ev.visitorId}
                   </td>
                   <td
                     style={{
@@ -1429,10 +1888,10 @@ function VisitorsPage({
           marginBottom: 24,
         }}
       >
-        <TopList title="Countries" data={topCountries} barColor="#10b981" />
-        <TopList title="Browsers" data={topBrowsers} barColor="#10b981" />
-        <TopList title="Devices" data={topDevices} barColor="#10b981" />
-        <TopList title="OS" data={topOs} barColor="#10b981" />
+        <TopList title="Countries" data={topCountries} barColor={S.greenStrong} />
+        <TopList title="Browsers" data={topBrowsers} barColor={S.greenStrong} />
+        <TopList title="Devices" data={topDevices} barColor={S.greenStrong} />
+        <TopList title="OS" data={topOs} barColor={S.greenStrong} />
       </div>
 
       <VisitorsFeed siteId={siteId} api={api} from={from} to={to} />
@@ -1458,14 +1917,14 @@ function VisitorsFeed({
   );
   return (
     <Card>
-      <SectionTitle>Visitors</SectionTitle>
+      <SectionTitle icon={SECTION_ICONS.Visitors}>Visitors</SectionTitle>
       {results.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No visitors in this period.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={tableWrapSty}>
+          <table style={tableSty}>
             <thead>
               <tr>
                 <th style={thSty}>Visitor ID</th>
@@ -1477,8 +1936,11 @@ function VisitorsFeed({
             <tbody>
               {results.map((v: any) => (
                 <tr key={v._id}>
-                  <td style={{ ...tdSty, fontFamily: "monospace" }}>
-                    {truncate(v.visitorId, 8)}
+                  <td
+                    style={{ ...tdSty, fontFamily: "monospace", whiteSpace: "nowrap" }}
+                    title={v.visitorId}
+                  >
+                    {v.visitorId}
                   </td>
                   <td
                     style={{
@@ -1503,10 +1965,9 @@ function VisitorsFeed({
                       ...tdSty,
                       color: v.identifiedUserId ? S.textPri : S.textMut,
                     }}
+                    title={v.identifiedUserId ?? "—"}
                   >
-                    {v.identifiedUserId
-                      ? truncate(v.identifiedUserId, 28)
-                      : "—"}
+                    {v.identifiedUserId ?? "—"}
                   </td>
                 </tr>
               ))}
@@ -1591,22 +2052,24 @@ function SessionsFeed({
     { siteId, from, to },
     { initialNumItems: 25 },
   );
+  const hasExitPath = results.some((s: any) => Boolean(s.exitPath));
   return (
     <Card>
-      <SectionTitle>Sessions</SectionTitle>
+      <SectionTitle icon={SECTION_ICONS.Sessions}>Sessions</SectionTitle>
       {results.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No sessions in this period.
         </div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={tableWrapSty}>
+          <table style={tableSty}>
             <thead>
               <tr>
                 <th style={thSty}>Session ID</th>
                 <th style={thSty}>Duration</th>
                 <th style={thSty}>Pages</th>
                 <th style={thSty}>Entry Path</th>
+                {hasExitPath ? <th style={thSty}>Exit Path</th> : null}
                 <th style={thSty}>Referrer</th>
                 <th style={thSty}>Device</th>
                 <th style={{ ...thSty, textAlign: "right" }}>Started</th>
@@ -1615,18 +2078,26 @@ function SessionsFeed({
             <tbody>
               {results.map((s: any) => (
                 <tr key={s._id}>
-                  <td style={{ ...tdSty, fontFamily: "monospace" }}>
-                    {truncate(s.sessionId, 8)}
+                  <td
+                    style={{ ...tdSty, fontFamily: "monospace", whiteSpace: "nowrap" }}
+                    title={s.sessionId}
+                  >
+                    {s.sessionId}
                   </td>
                   <td style={tdSty}>
                     {formatDuration(Math.max(0, s.lastSeenAt - s.startedAt))}
                   </td>
                   <td style={tdSty}>{s.pageviewCount}</td>
-                  <td style={{ ...tdSty, color: S.textSec }}>
-                    {truncate(s.entryPath ?? "/", 40)}
+                  <td style={{ ...tdSty, color: S.textSec }} title={s.entryPath ?? "/"}>
+                    {s.entryPath ?? "/"}
                   </td>
-                  <td style={{ ...tdSty, color: S.textSec }}>
-                    {truncate(s.referrer ?? "—", 30)}
+                  {hasExitPath ? (
+                    <td style={{ ...tdSty, color: S.textSec }} title={s.exitPath ?? ""}>
+                      {s.exitPath ?? ""}
+                    </td>
+                  ) : null}
+                  <td style={{ ...tdSty, color: S.textSec }} title={s.referrer ?? "—"}>
+                    {s.referrer ?? "—"}
                   </td>
                   <td style={{ ...tdSty, color: S.textSec }}>
                     {s.device ?? "—"}

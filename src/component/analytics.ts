@@ -162,7 +162,7 @@ export const getTopDevices = query({
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topDimension(ctx, args, "device", args.limit ?? 10),
+    topVisitorDimension(ctx, args, "device", args.limit ?? 10),
 });
 
 export const getTopBrowsers = query({
@@ -174,7 +174,7 @@ export const getTopBrowsers = query({
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topDimension(ctx, args, "browser", args.limit ?? 10),
+    topVisitorDimension(ctx, args, "browser", args.limit ?? 10),
 });
 
 export const getTopOs = query({
@@ -185,7 +185,8 @@ export const getTopOs = query({
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
-  handler: async (ctx, args) => topDimension(ctx, args, "os", args.limit ?? 10),
+  handler: async (ctx, args) =>
+    topVisitorDimension(ctx, args, "os", args.limit ?? 10),
 });
 
 export const getTopCountries = query({
@@ -197,7 +198,7 @@ export const getTopCountries = query({
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topDimension(ctx, args, "country", args.limit ?? 10),
+    topVisitorDimension(ctx, args, "country", args.limit ?? 10),
 });
 
 // Single combined query for the main dashboard overview page.
@@ -484,6 +485,25 @@ export async function topDimension(
     .slice(0, Math.min(limit, 100));
 }
 
+async function topVisitorDimension(
+  ctx: QueryCtx,
+  args: { siteId: IdOfSite; from: number; to: number },
+  dimension: "device" | "browser" | "os" | "country",
+  limit: number,
+) {
+  const rows = await topDimension(ctx, args, dimension, limit);
+  if (rows.length > 0) {
+    return rows;
+  }
+  return await summarizeSessionTopDimension(ctx, {
+    siteId: args.siteId,
+    from: args.from,
+    to: args.to,
+    dimension,
+    limit,
+  });
+}
+
 async function eventPropertyBreakdown(
   ctx: QueryCtx,
   args: {
@@ -538,10 +558,13 @@ async function queryTimeseries(
     return [];
   }
   const bucketMs = args.interval === "hour" ? hourMs : dayMs;
-  const rows =
+  const [rows, sessionCounts, visitorCounts] = await Promise.all([
     args.interval === "hour"
-      ? await queryHourlyRollups(ctx, args, "overview", "all")
-      : await queryDailyRollups(ctx, args, "overview", "all");
+      ? queryHourlyRollups(ctx, args, "overview", "all")
+      : queryDailyRollups(ctx, args, "overview", "all"),
+    querySessionBucketCounts(ctx, args),
+    queryVisitorBucketCounts(ctx, args),
+  ]);
 
   const byBucket = new Map<
     number,
@@ -556,8 +579,6 @@ async function queryTimeseries(
     };
     current.events += row.count;
     current.pageviews += row.pageviewCount;
-    current.sessions += row.sessionCount ?? 0;
-    current.visitors += row.visitorCount ?? 0;
     byBucket.set(row.bucketStart, current);
   }
   const bucketStarts = collectBucketStarts(args.from, args.to, bucketMs);
@@ -567,45 +588,57 @@ async function queryTimeseries(
   const firstBucketStart = bucketStarts[0];
   const lastBucketStart = bucketStarts[bucketStarts.length - 1];
   if (args.from !== firstBucketStart) {
-    byBucket.set(
-      firstBucketStart,
-      toTimeseriesRow(
-        await aggregateOverviewRange(ctx, {
-          siteId: args.siteId,
-          from: args.from,
-          to: Math.min(args.to, firstBucketStart + bucketMs),
-        }),
-      ),
-    );
+    const exact = await aggregateOverviewRange(ctx, {
+      siteId: args.siteId,
+      from: args.from,
+      to: Math.min(args.to, firstBucketStart + bucketMs),
+    });
+    const current = byBucket.get(firstBucketStart) ?? {
+      events: 0,
+      pageviews: 0,
+      sessions: 0,
+      visitors: 0,
+    };
+    current.events = exact.count;
+    current.pageviews = exact.pageviewCount;
+    byBucket.set(firstBucketStart, current);
   }
   const lastBucketEnd = lastBucketStart + bucketMs;
   if (args.to !== lastBucketEnd && lastBucketStart !== firstBucketStart) {
-    byBucket.set(
-      lastBucketStart,
-      toTimeseriesRow(
-        await aggregateOverviewRange(ctx, {
-          siteId: args.siteId,
-          from: Math.max(args.from, lastBucketStart),
-          to: args.to,
-        }),
-      ),
-    );
+    const exact = await aggregateOverviewRange(ctx, {
+      siteId: args.siteId,
+      from: Math.max(args.from, lastBucketStart),
+      to: args.to,
+    });
+    const current = byBucket.get(lastBucketStart) ?? {
+      events: 0,
+      pageviews: 0,
+      sessions: 0,
+      visitors: 0,
+    };
+    current.events = exact.count;
+    current.pageviews = exact.pageviewCount;
+    byBucket.set(lastBucketStart, current);
   } else if (
     args.to !== lastBucketEnd &&
     lastBucketStart === firstBucketStart
   ) {
     // A single partial bucket hits both edges. Re-run the exact [from, to)
     // range so we replace the first-bucket clip above with the correct total.
-    byBucket.set(
-      lastBucketStart,
-      toTimeseriesRow(
-        await aggregateOverviewRange(ctx, {
-          siteId: args.siteId,
-          from: args.from,
-          to: args.to,
-        }),
-      ),
-    );
+    const exact = await aggregateOverviewRange(ctx, {
+      siteId: args.siteId,
+      from: args.from,
+      to: args.to,
+    });
+    const current = byBucket.get(lastBucketStart) ?? {
+      events: 0,
+      pageviews: 0,
+      sessions: 0,
+      visitors: 0,
+    };
+    current.events = exact.count;
+    current.pageviews = exact.pageviewCount;
+    byBucket.set(lastBucketStart, current);
   }
   return bucketStarts.map((bucketStart) => ({
     bucketStart,
@@ -615,6 +648,8 @@ async function queryTimeseries(
       sessions: 0,
       visitors: 0,
     }),
+    sessions: sessionCounts.get(bucketStart) ?? 0,
+    visitors: visitorCounts.get(bucketStart) ?? 0,
   }));
 }
 
@@ -908,6 +943,43 @@ async function summarizeRawTopDimension(
   return [...byKey.entries()].map(([key, value]) => ({ key, ...value }));
 }
 
+async function summarizeSessionTopDimension(
+  ctx: QueryCtx,
+  args: {
+    siteId: IdOfSite;
+    from: number;
+    to: number;
+    dimension: "device" | "browser" | "os" | "country";
+    limit: number;
+  },
+) {
+  const byKey = new Map<string, { count: number; pageviewCount: number }>();
+  if (args.from >= args.to) {
+    return [];
+  }
+  for await (const session of ctx.db
+    .query("sessions")
+    .withIndex("by_siteId_and_startedAt", (q) =>
+      q
+        .eq("siteId", args.siteId)
+        .gte("startedAt", args.from)
+        .lt("startedAt", args.to),
+    )) {
+    const key = keyForSessionDimension(session, args.dimension);
+    if (!key) {
+      continue;
+    }
+    const current = byKey.get(key) ?? { count: 0, pageviewCount: 0 };
+    current.count += 1;
+    current.pageviewCount += session.pageviewCount;
+    byKey.set(key, current);
+  }
+  return [...byKey.entries()]
+    .map(([key, value]) => ({ key, ...value }))
+    .sort((left, right) => right.count - left.count)
+    .slice(0, Math.min(args.limit, 100));
+}
+
 async function queryDimensionRollups(
   ctx: QueryCtx,
   args: {
@@ -1016,20 +1088,6 @@ function collectBucketStarts(from: number, to: number, bucketMs: number) {
   return starts;
 }
 
-function toTimeseriesRow(row: {
-  count: number;
-  pageviewCount: number;
-  sessionCount: number;
-  visitorCount: number;
-}) {
-  return {
-    events: row.count,
-    pageviews: row.pageviewCount,
-    sessions: row.sessionCount,
-    visitors: row.visitorCount,
-  };
-}
-
 function keyForEventDimension(
   event: {
     eventName: string;
@@ -1069,6 +1127,27 @@ function keyForEventDimension(
       return event.utmCampaign;
     default:
       return undefined;
+  }
+}
+
+function keyForSessionDimension(
+  session: {
+    device?: string;
+    browser?: string;
+    os?: string;
+    country?: string;
+  },
+  dimension: "device" | "browser" | "os" | "country",
+) {
+  switch (dimension) {
+    case "device":
+      return session.device;
+    case "browser":
+      return session.browser;
+    case "os":
+      return session.os;
+    case "country":
+      return session.country;
   }
 }
 
