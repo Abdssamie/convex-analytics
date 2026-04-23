@@ -29,7 +29,7 @@ export function createAnalytics(options: {
 			events,
 		});
 		try {
-			await fetch(options.endpoint, {
+			const response = await fetch(options.endpoint, {
 				method: "POST",
 				headers: {
 					"content-type": "application/json",
@@ -38,6 +38,9 @@ export function createAnalytics(options: {
 				body: payload,
 				keepalive: true,
 			});
+			if (!response.ok) {
+				throw new Error(`Analytics flush failed with ${response.status}`);
+			}
 		} catch {
 			queue.unshift(...events);
 		}

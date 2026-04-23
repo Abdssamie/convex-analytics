@@ -49,7 +49,7 @@ export const cleanupSite = action({
 			1,
 			Math.min(args.limit ?? cleanupBatchLimit, 500),
 		);
-		const runUntilComplete = args.runUntilComplete ?? true;
+		const runUntilComplete = args.runUntilComplete ?? false;
 		const rawEventCutoff =
 			now -
 			daysToMs(

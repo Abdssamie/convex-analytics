@@ -2,7 +2,7 @@ import { mutation, internalMutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import {
 	contextValidator,
 	eventInputValidator,
@@ -170,43 +170,28 @@ export async function aggregateEventsByIds(
 		identifiedUserId?: string;
 		traits?: Record<string, string | number | boolean | null>;
 	}>();
-	const sessionUpdates = new Map<string, {
-		siteId: IdOfSite;
-		sessionId: string;
-		visitorId: string;
-		firstSeenAt: number;
-		lastSeenAt: number;
-		entryPath?: string;
-		exitPath?: string;
-		referrer?: string;
-		device?: string;
-		browser?: string;
-		os?: string;
-		country?: string;
-		utmSource?: string;
-		utmMedium?: string;
-		utmCampaign?: string;
-		identifiedUserId?: string;
-		pageviewCount: number;
-		sessionTimeoutMs: number;
-	}>();
-	const sitesCache = new Map<IdOfSite, any>();
+	const sessionUpdates = new Map<string, SessionUpdate>();
+	const sitesCache = new Map<IdOfSite, Doc<"sites">>();
 
-	const validEvents = [];
+	const validEvents: Array<Doc<"events">> = [];
 	for (const eventId of eventIds.slice(0, aggregationBatchLimit)) {
 		const event = await ctx.db.get(eventId);
 		if (!event || event.aggregatedAt !== null) {
 			skipped += 1;
 			continue;
 		}
-		validEvents.push(event);
 
 		let site = sitesCache.get(event.siteId);
 		if (!site) {
-			site = await ctx.db.get(event.siteId);
-			if (!site) continue; // Should not happen
+			const loadedSite = await ctx.db.get(event.siteId);
+			if (!loadedSite) {
+				failed += 1;
+				continue;
+			}
+			site = loadedSite;
 			sitesCache.set(event.siteId, site);
 		}
+		validEvents.push(event);
 
 		// Group visitor updates
 		const vKey = `${event.siteId}|${event.visitorId}`;
@@ -223,44 +208,13 @@ export async function aggregateEventsByIds(
 			vUpdate.traits = event.properties ?? vUpdate.traits;
 		}
 		visitorUpdates.set(vKey, vUpdate);
-
-		// Group session updates
-		const sKey = `${event.siteId}|${event.sessionId}`;
-		const sUpdate = sessionUpdates.get(sKey) ?? {
-			siteId: event.siteId,
-			sessionId: event.sessionId,
-			visitorId: event.visitorId,
-			firstSeenAt: event.occurredAt,
-			lastSeenAt: event.occurredAt,
-			device: event.device,
-			browser: event.browser,
-			os: event.os,
-			country: event.country,
-			utmSource: event.utmSource,
-			utmMedium: event.utmMedium,
-			utmCampaign: event.utmCampaign,
-			pageviewCount: 0,
-			sessionTimeoutMs: site.settings.sessionTimeoutMs,
-			entryPath: undefined as string | undefined,
-			exitPath: undefined as string | undefined,
-			referrer: undefined as string | undefined,
-			identifiedUserId: undefined as string | undefined,
-		};
-		if (event.occurredAt <= sUpdate.firstSeenAt) {
-			sUpdate.firstSeenAt = event.occurredAt;
-			sUpdate.entryPath = event.path ?? sUpdate.entryPath;
-			sUpdate.referrer = event.referrer ?? sUpdate.referrer;
-		}
-		if (event.occurredAt >= sUpdate.lastSeenAt) {
-			sUpdate.lastSeenAt = event.occurredAt;
-			sUpdate.exitPath = event.path ?? sUpdate.exitPath;
-		}
-		sUpdate.identifiedUserId = event.identifiedUserId ?? sUpdate.identifiedUserId;
-		if (event.eventType === "pageview") {
-			sUpdate.pageviewCount += 1;
-		}
-		sessionUpdates.set(sKey, sUpdate);
 	}
+
+	const eventToSessionUpdateKey = buildSessionUpdates(
+		validEvents,
+		sitesCache,
+		sessionUpdates,
+	);
 
 	const visitorsCreated = new Map<string, boolean>();
 	const sessionsCreated = new Map<string, boolean>();
@@ -283,7 +237,11 @@ export async function aggregateEventsByIds(
 	for (const event of validEvents) {
 		try {
 			const vKey = `${event.siteId}|${event.visitorId}`;
-			const sKey = `${event.siteId}|${event.sessionId}`;
+			const sKey = eventToSessionUpdateKey.get(event._id);
+			if (!sKey) {
+				failed += 1;
+				continue;
+			}
 
 			const isNewVisitor = visitorsCreated.get(vKey) && !visitorHasRollup.has(vKey);
 			const isNewSession = sessionsCreated.get(sKey) && !sessionHasRollup.has(sKey);
@@ -321,6 +279,123 @@ export async function aggregateEventsByIds(
 	await flushRollups(ctx, rollupDeltas);
 
 	return { aggregated, skipped, failed };
+}
+
+type SessionUpdate = {
+	siteId: IdOfSite;
+	sessionId: string;
+	visitorId: string;
+	firstSeenAt: number;
+	lastSeenAt: number;
+	entryPath?: string;
+	exitPath?: string;
+	referrer?: string;
+	device?: string;
+	browser?: string;
+	os?: string;
+	country?: string;
+	utmSource?: string;
+	utmMedium?: string;
+	utmCampaign?: string;
+	identifiedUserId?: string;
+	pageviewCount: number;
+	sessionTimeoutMs: number;
+};
+
+function buildSessionUpdates(
+	events: Array<Doc<"events">>,
+	sitesCache: Map<IdOfSite, Doc<"sites">>,
+	sessionUpdates: Map<string, SessionUpdate>,
+) {
+	const eventsBySessionId = new Map<string, Array<Doc<"events">>>();
+	for (const event of events) {
+		const key = `${event.siteId}|${event.sessionId}`;
+		const bucket = eventsBySessionId.get(key) ?? [];
+		bucket.push(event);
+		eventsBySessionId.set(key, bucket);
+	}
+
+	const eventToSessionUpdateKey = new Map<Id<"events">, string>();
+	for (const [groupKey, sessionEvents] of eventsBySessionId.entries()) {
+		const sortedEvents = [...sessionEvents].sort(
+			(left, right) => left.occurredAt - right.occurredAt,
+		);
+		const firstEvent = sortedEvents[0];
+		if (!firstEvent) {
+			continue;
+		}
+		const site = sitesCache.get(firstEvent.siteId);
+		if (!site) {
+			continue;
+		}
+
+		let batchIndex = 0;
+		let currentKey = `${groupKey}|${batchIndex}`;
+		let currentUpdate = createSessionUpdate(firstEvent, site);
+		sessionUpdates.set(currentKey, currentUpdate);
+		eventToSessionUpdateKey.set(firstEvent._id, currentKey);
+
+		for (const event of sortedEvents.slice(1)) {
+			if (
+				event.occurredAt - currentUpdate.lastSeenAt >
+				currentUpdate.sessionTimeoutMs
+			) {
+				batchIndex += 1;
+				currentKey = `${groupKey}|${batchIndex}`;
+				currentUpdate = createSessionUpdate(event, site);
+				sessionUpdates.set(currentKey, currentUpdate);
+				eventToSessionUpdateKey.set(event._id, currentKey);
+				continue;
+			}
+			mergeSessionEvent(currentUpdate, event);
+			eventToSessionUpdateKey.set(event._id, currentKey);
+		}
+	}
+
+	return eventToSessionUpdateKey;
+}
+
+function createSessionUpdate(
+	event: Doc<"events">,
+	site: Doc<"sites">,
+): SessionUpdate {
+	const update: SessionUpdate = {
+		siteId: event.siteId,
+		sessionId: event.sessionId,
+		visitorId: event.visitorId,
+		firstSeenAt: event.occurredAt,
+		lastSeenAt: event.occurredAt,
+		entryPath: event.path,
+		exitPath: event.path,
+		referrer: event.referrer,
+		device: event.device,
+		browser: event.browser,
+		os: event.os,
+		country: event.country,
+		utmSource: event.utmSource,
+		utmMedium: event.utmMedium,
+		utmCampaign: event.utmCampaign,
+		identifiedUserId: event.identifiedUserId,
+		pageviewCount: event.eventType === "pageview" ? 1 : 0,
+		sessionTimeoutMs: site.settings.sessionTimeoutMs,
+	};
+	return update;
+}
+
+function mergeSessionEvent(update: SessionUpdate, event: Doc<"events">) {
+	if (event.occurredAt <= update.firstSeenAt) {
+		update.firstSeenAt = event.occurredAt;
+		update.entryPath = event.path ?? update.entryPath;
+		update.referrer = event.referrer ?? update.referrer;
+	}
+	if (event.occurredAt >= update.lastSeenAt) {
+		update.lastSeenAt = event.occurredAt;
+		update.exitPath = event.path ?? update.exitPath;
+	}
+	update.identifiedUserId = event.identifiedUserId ?? update.identifiedUserId;
+	if (event.eventType === "pageview") {
+		update.pageviewCount += 1;
+	}
 }
 
 export const upsertVisitor = internalMutation({

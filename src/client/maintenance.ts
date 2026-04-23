@@ -61,7 +61,7 @@ export function registerDefaultAnalyticsCrons(
 			siteId: options.siteId,
 			slug: options.slug,
 			limit,
-			runUntilComplete: true,
+			runUntilComplete: false,
 		},
 	);
 

@@ -21,6 +21,7 @@ export function registerRoutes(
 	options?: {
 		path?: string;
 		allowedHeaders?: string[];
+		countryLookup?: "headers-only" | "country-is";
 	},
 ) {
 	const path = options?.path ?? "/analytics/ingest";
@@ -55,7 +56,10 @@ export function registerRoutes(
 			}
 			const writeKeyHash = await hashWriteKey(writeKey);
 			const body = await request.json();
-			const country = await getCountry(request);
+			const country = await getCountry(
+				request,
+				options?.countryLookup ?? "headers-only",
+			);
 			const result = await ingestFromHttp(ctx, component, {
 				writeKeyHash,
 				origin,
@@ -119,10 +123,21 @@ export function withDetectedCountry(
 	};
 }
 
-export async function getCountry(request: Request) {
+export function getHeaderCountry(request: Request) {
 	const cfCountry = request.headers.get("cf-ipcountry");
 	if (cfCountry && cfCountry !== "XX") {
 		return cfCountry;
+	}
+	return undefined;
+}
+
+export async function getCountryWithFallback(
+	request: Request,
+	mode: "headers-only" | "country-is",
+) {
+	const headerCountry = getHeaderCountry(request);
+	if (headerCountry || mode === "headers-only") {
+		return headerCountry;
 	}
 
 	const ip =
@@ -144,6 +159,13 @@ export async function getCountry(request: Request) {
 	} catch {
 		return undefined;
 	}
+}
+
+export async function getCountry(
+	request: Request,
+	mode: "headers-only" | "country-is" = "headers-only",
+) {
+	return await getCountryWithFallback(request, mode);
 }
 
 function isValidIp(ip: string) {
