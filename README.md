@@ -172,6 +172,8 @@ export default crons;
 ```
 
 That is enough for normal installs.
+Default helper runs bounded cleanup batches on each cron tick. Use
+`runUntilComplete: true` only for explicit backfills or catch-up work.
 
 For multiple sites on same Convex deployment, call `createSite(...)` once for
 each site with separate write keys and origins.
@@ -189,16 +191,24 @@ import { components } from "./_generated/api";
 import { exposeAnalyticsApi } from "@Abdssamie/convex-analytics";
 
 export const {
+  getDashboardSummary,
   getOverview,
   getTimeseries,
+  getEventPropertyBreakdown,
   getTopPages,
   getTopReferrers,
   getTopSources,
   getTopMediums,
   getTopCampaigns,
   getTopEvents,
+  getTopDevices,
+  getTopBrowsers,
+  getTopOs,
+  getTopCountries,
   listRawEvents,
+  listPageviews,
   listSessions,
+  listVisitors,
 } = exposeAnalyticsApi(components.convexAnalytics, {
   auth: async (ctx, operation) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -217,16 +227,24 @@ functions. For dashboard/read-only app surface, use `exposeAnalyticsApi(...)`.
 
 Dashboard surface:
 
+- `getDashboardSummary(siteId, from, to, interval)`
 - `getOverview(siteId, from, to)`
 - `getTimeseries(siteId, from, to, interval)`
+- `getEventPropertyBreakdown(siteId, eventName, propertyKey, from, to, limit?)`
 - `getTopPages(siteId, from, to, limit?)`
 - `getTopReferrers(siteId, from, to, limit?)`
 - `getTopSources(siteId, from, to, limit?)`
 - `getTopMediums(siteId, from, to, limit?)`
 - `getTopCampaigns(siteId, from, to, limit?)`
 - `getTopEvents(siteId, from, to, limit?)`
+- `getTopDevices(siteId, from, to, limit?)`
+- `getTopBrowsers(siteId, from, to, limit?)`
+- `getTopOs(siteId, from, to, limit?)`
+- `getTopCountries(siteId, from, to, limit?)`
 - `listRawEvents(siteId, from?, to?, paginationOpts)`
+- `listPageviews(siteId, from?, to?, paginationOpts)`
 - `listSessions(siteId, from?, to?, paginationOpts)`
+- `listVisitors(siteId, from?, to?, paginationOpts)`
 
 Admin/repair functions exist too, but they are separate from dashboard reads.
 Use `exposeAdminApi(...)` only in backend/admin modules:
@@ -257,9 +275,29 @@ Recommended dashboard shape:
 1. `getOverview` for KPI cards
 2. `getTimeseries` for chart
 3. top-dimension queries for tables
-4. `listRawEvents` and `listSessions` for drill-down/debug
+4. `getEventPropertyBreakdown` for lean product-event analysis
+5. `listRawEvents` / `listPageviews` / `listSessions` / `listVisitors` for drill-down/debug
 
-Both drill-down queries return Convex pagination objects:
+Example product analytics query:
+
+```ts
+await ctx.runQuery(api.analytics.getEventPropertyBreakdown, {
+  siteId,
+  eventName: "plan_selected",
+  propertyKey: "plan",
+  from,
+  to,
+  limit: 10,
+});
+```
+
+Recommended event naming:
+
+- `track("plan_selected", { plan: "pro" })`
+- `track("checkout_started", { step: "shipping" })`
+- `identify(userId, { plan: "pro" })`
+
+Drill-down queries return Convex pagination objects:
 
 - `page`
 - `isDone`
@@ -281,6 +319,7 @@ specific fields when needed:
 ```ts
 registerRoutes(http, components.convexAnalytics, {
   path: "/analytics/ingest",
+  countryLookup: "headers-only",
 });
 ```
 
@@ -292,16 +331,16 @@ If you want custom schedules, this is the manual shape:
 ```ts
 // convex/cleanup.ts
 import { components } from "./_generated/api";
-import { internalMutation } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
 
-export const site = internalMutation({
+export const site = internalAction({
   args: {
     slug: v.string(),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    return await ctx.runMutation(components.convexAnalytics.maintenance.cleanupSite, {
+    return await ctx.runAction(components.convexAnalytics.maintenance.cleanupSite, {
       slug: args.slug,
       limit: args.limit,
     });
@@ -343,11 +382,12 @@ import { createAnalytics } from "@Abdssamie/convex-analytics";
 const analytics = createAnalytics({
   endpoint: "https://your-deployment.convex.site/analytics/ingest",
   writeKey: "write_...",
-  autoPageviews: true,
+  autoPageviews: false,
   flushIntervalMs: 5000,
   maxBatchSize: 10,
 });
 
+analytics.page();
 analytics.track("signup_clicked", { plan: "pro" });
 analytics.identify("user_123", { tier: "pro" });
 await analytics.flush();
@@ -361,6 +401,15 @@ The SDK stores:
 
 It flushes on interval, batch size, and `pagehide`.
 
+`autoPageviews: true` works for traditional full-page loads. For SPAs, call
+`analytics.page()` on route changes yourself:
+
+```ts
+useEffect(() => {
+  analytics.page();
+}, [analytics, pathname]);
+```
+
 ## Cost Controls
 
 The default ingest path is built to avoid unnecessary Convex usage:
@@ -373,6 +422,26 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.
+- Country enrichment is header-only by default. Third-party lookup is opt-in.
+
+## Publishing
+
+Release scripts:
+
+- `npm run alpha`
+- `npm run release`
+
+Both go through `preversion`, which runs:
+
+- `npm ci`
+- `npm run build:clean`
+- `npm run test`
+- `npm run lint`
+- `npm run typecheck`
+
+Current `npm version` flow also runs the package `version` script, which opens
+`CHANGELOG.md` in `vim`. Adjust that script if you want a fully non-interactive
+release flow in CI.
 
 ## Development
 

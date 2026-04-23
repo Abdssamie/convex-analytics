@@ -1876,8 +1876,6 @@ function VisitorsPage({
         <strong>⚠ New visitors only.</strong> These counts reflect visitors
         whose <em>first ever</em> visit falls within the selected period.
         Returning visitors who first arrived before this window are not counted.
-        Accurate "all active visitors" requires scanning raw events for unique
-        IDs, which hits Convex read limits at scale.
       </div>
 
       <div
