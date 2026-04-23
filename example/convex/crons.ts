@@ -1,6 +1,6 @@
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api.js";
-import { registerDefaultAnalyticsCrons } from "@Abdssamie/convex-analytics";
+import { registerDefaultAnalyticsCrons } from "../../src/client/index.js";
 
 const crons = cronJobs();
 

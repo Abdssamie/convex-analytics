@@ -1,6 +1,6 @@
 import "./App.css";
-import { createAnalytics } from "@Abdssamie/convex-analytics";
-import { AnalyticsDashboard } from "@Abdssamie/convex-analytics/react";
+import { createAnalytics } from "../../src/client/index.js";
+import { AnalyticsDashboard } from "../../src/react/index.js";
 import { useQuery } from "convex/react";
 import { useMemo, useState, useEffect } from "react";
 import { api } from "../convex/_generated/api";
@@ -90,9 +90,13 @@ function App() {
     return createAnalytics({
       endpoint: `${endpoint}/analytics/ingest`,
       writeKey,
-      autoPageviews: true,
+      autoPageviews: false,
     });
   }, []);
+
+  useEffect(() => {
+    analytics.page();
+  }, [analytics, path]);
 
   useEffect(() => {
     installAnalyticsLoadHarness(analytics, {

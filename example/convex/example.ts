@@ -3,7 +3,7 @@ import { components } from "./_generated/api.js";
 import {
   exposeAdminApi,
   exposeAnalyticsApi,
-} from "@Abdssamie/convex-analytics";
+} from "../../src/client/index.js";
 import { v } from "convex/values";
 
 async function hashWriteKey(writeKey: string) {
@@ -28,6 +28,7 @@ export const {
   getDashboardSummary,
   getOverview,
   getTimeseries,
+  getEventPropertyBreakdown,
   getTopPages,
   getTopReferrers,
   getTopSources,

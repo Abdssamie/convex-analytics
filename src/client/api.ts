@@ -15,6 +15,7 @@ export function exposeAnalyticsApi(
     getDashboardSummary,
     getOverview,
     getTimeseries,
+    getEventPropertyBreakdown,
     getTopPages,
     getTopReferrers,
     getTopSources,
@@ -34,6 +35,7 @@ export function exposeAnalyticsApi(
     getDashboardSummary,
     getOverview,
     getTimeseries,
+    getEventPropertyBreakdown,
     getTopPages,
     getTopReferrers,
     getTopSources,
@@ -196,6 +198,23 @@ export function exposeApi(
       handler: async (ctx, args) => {
         await options.auth(ctx, { type: "read", siteId: args.siteId });
         return await ctx.runQuery(component.analytics.getTimeseries, args);
+      },
+    }),
+    getEventPropertyBreakdown: queryGeneric({
+      args: {
+        siteId: v.string(),
+        eventName: v.string(),
+        propertyKey: v.string(),
+        from: v.number(),
+        to: v.number(),
+        limit: v.optional(v.number()),
+      },
+      handler: async (ctx, args) => {
+        await options.auth(ctx, { type: "read", siteId: args.siteId });
+        return await ctx.runQuery(
+          component.analytics.getEventPropertyBreakdown,
+          args,
+        );
       },
     }),
     getTopPages: queryGeneric({

@@ -1,5 +1,5 @@
 import { defineApp } from "convex/server";
-import convexAnalytics from "@Abdssamie/convex-analytics/convex.config.js";
+import convexAnalytics from "../../src/component/convex.config.js";
 
 const app = defineApp();
 app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });

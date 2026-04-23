@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { components } from "./_generated/api.js";
-import { registerRoutes } from "@Abdssamie/convex-analytics";
+import { registerRoutes } from "../../src/client/index.js";
 
 const http = httpRouter();
 

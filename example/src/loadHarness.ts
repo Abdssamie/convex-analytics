@@ -1,4 +1,4 @@
-import type { AnalyticsProperties } from "@Abdssamie/convex-analytics";
+import type { AnalyticsProperties } from "../../src/client/index.js";
 
 type AnalyticsClient = {
 	page(properties?: AnalyticsProperties): void;

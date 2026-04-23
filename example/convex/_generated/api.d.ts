@@ -53,5 +53,5 @@ export declare const internal: FilterApi<
 >;
 
 export declare const components: {
-  convexAnalytics: import("@Abdssamie/convex-analytics/_generated/component.js").ComponentApi<"convexAnalytics">;
+  convexAnalytics: import("../../../src/component/_generated/component.js").ComponentApi<"convexAnalytics">;
 };
