@@ -4,18 +4,10 @@ A Convex component for first-party product and web analytics. It stores events
 directly in your Convex deployment, with browser batching, anonymous visitors,
 sessions, raw event history, and async rollup-backed reports.
 
-This component is designed for apps that want Rybbit-style core analytics
+This component is designed for apps that want core analytics
 without running a separate analytics service.
 
 ## Quick Start
-
-Most apps only need 5 things:
-
-1. Install the component in `convex/convex.config.ts`
-2. Register the ingest route in `convex/http.ts`
-3. Set one analytics write key
-4. Send events from the browser with that same key
-5. Render the dashboard
 
 ### Before you start: one write key, two places
 
@@ -34,6 +26,10 @@ Suggested env vars:
 If those two values do not match, events will not be ingested.
 
 ### 1. Install the Convex component
+
+```sh
+npm install @abdssamie/convex-analytics
+```
 
 ```ts
 import { defineApp } from "convex/server";
@@ -82,7 +78,7 @@ export const provisionDefaultSite = provisionSite(components.convexAnalytics, {
     slug: "default",
     name: "Default site",
     writeKey: process.env.ANALYTICS_WRITE_KEY!,
-    allowedOrigins: [],
+    allowedOrigins: [], // Don't forget allowed origins here to protect your service if key gets leaked
   },
 });
 ```
