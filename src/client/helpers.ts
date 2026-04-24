@@ -12,6 +12,16 @@ export async function hashWriteKey(writeKey: string) {
 		.join("");
 }
 
+export function requireWriteKey(
+	writeKey: string | null | undefined,
+	message: string = "Analytics write key is required.",
+) {
+	if (typeof writeKey !== "string" || writeKey.trim() === "") {
+		throw new Error(message);
+	}
+	return writeKey;
+}
+
 export function corsHeaders(origin: string, allowedHeaders: string[]) {
 	return {
 		"Access-Control-Allow-Origin": origin,

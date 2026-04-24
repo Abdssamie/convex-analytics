@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import type { ComponentApi } from "../component/_generated/component";
 import type { AuthFn } from "./types";
-import { hashWriteKey } from "./helpers";
+import { hashWriteKey, requireWriteKey } from "./helpers";
 
 export function exposeAnalyticsApi(
   component: ComponentApi,
@@ -105,10 +105,15 @@ export function provisionSite(
         };
       }
 
+      const writeKey = requireWriteKey(
+        options.site.writeKey,
+        "Analytics write key is missing. Set your analytics write key env var before running this provisioning mutation.",
+      );
+
       const siteId = await ctx.runMutation(component.sites.createSite, {
         slug: options.site.slug,
         name: options.site.name,
-        writeKeyHash: await hashWriteKey(options.site.writeKey),
+        writeKeyHash: await hashWriteKey(writeKey),
         allowedOrigins: options.site.allowedOrigins,
         sessionTimeoutMs: options.site.sessionTimeoutMs,
         retentionDays: options.site.retentionDays,
@@ -164,6 +169,7 @@ export function exposeApi(
           allowedPropertyKeys,
           deniedPropertyKeys,
         } = args;
+        const validatedWriteKey = requireWriteKey(writeKey);
         return await ctx.runMutation(component.sites.createSite, {
           slug,
           name,
@@ -175,7 +181,7 @@ export function exposeApi(
           dailyRollupRetentionDays,
           allowedPropertyKeys,
           deniedPropertyKeys,
-          writeKeyHash: await hashWriteKey(writeKey),
+          writeKeyHash: await hashWriteKey(validatedWriteKey),
         });
       },
     }),
@@ -211,9 +217,10 @@ export function exposeApi(
           type: "admin",
           siteId: args.siteId,
         });
+        const writeKey = requireWriteKey(args.writeKey);
         return await ctx.runMutation(component.sites.rotateWriteKey, {
           siteId: args.siteId,
-          writeKeyHash: await hashWriteKey(args.writeKey),
+          writeKeyHash: await hashWriteKey(writeKey),
         });
       },
     }),

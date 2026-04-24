@@ -61,9 +61,16 @@ Dashboard queries are range-aware:
 - first/last timeseries bucket is clipped to requested range
 - raw events can lag by worker time, usually a few seconds
 
-## Installation
+## Quick Start
 
-Install the component in `convex/convex.config.ts`:
+Most apps only need 4 things:
+
+1. Install the component in `convex/convex.config.ts`
+2. Register the ingest route in `convex/http.ts`
+3. Create one site named `default`
+4. Use the browser SDK in your frontend
+
+### 1. Install the Convex component
 
 ```ts
 import { defineApp } from "convex/server";
@@ -75,29 +82,39 @@ app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });
 export default app;
 ```
 
-Recommended app integration: keep the pieces separate, but use a tiny
-idempotent provisioning helper for the default site so you do not have to wire
-`getSiteBySlug` and `createSite` manually.
+### 2. Register the ingest route
+
+```ts
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { components } from "./_generated/api";
+import { registerRoutes } from "@abdssamie/convex-analytics";
+
+const http = httpRouter();
+
+registerRoutes(http, components.convexAnalytics);
+
+export default http;
+```
+
+If `components.convexAnalytics` is missing, start your Convex dev server first
+so generated component bindings exist:
+
+```sh
+npx convex dev
+```
+
+### 3. Create the default site once
+
+Create a tiny bootstrap mutation:
 
 ```ts
 // convex/analytics.ts
 import { components } from "./_generated/api";
-import {
-  exposeAdminApi,
-  exposeAnalyticsApi,
-  provisionSite,
-} from "@abdssamie/convex-analytics";
-
-const auth = async (ctx: { auth: { getUserIdentity: () => Promise<unknown> } }) => {
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) {
-    throw new Error("Unauthorized");
-  }
-  // Add your own site ownership / admin checks here when needed.
-};
+import { provisionSite } from "@abdssamie/convex-analytics";
 
 export const provisionDefaultSite = provisionSite(components.convexAnalytics, {
-  auth: async (ctx) => auth(ctx),
+  auth: async () => {},
   site: {
     slug: "default",
     name: "Default site",
@@ -105,12 +122,168 @@ export const provisionDefaultSite = provisionSite(components.convexAnalytics, {
     allowedOrigins: [],
   },
 });
+```
+
+Then run it once:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
+
+`provisionDefaultSite` is idempotent. If `default` already exists, nothing breaks.
+It also fails fast if your analytics write key env var is missing or empty.
+
+### 4. Use the browser SDK
+
+```ts
+import { createAnalytics } from "@abdssamie/convex-analytics";
+
+const analytics = createAnalytics({
+  endpoint: "https://your-deployment.convex.site/analytics/ingest",
+  writeKey: "write_...",
+  autoPageviews: false,
+});
+
+analytics.page();
+analytics.track("signup_clicked", { plan: "pro" });
+analytics.identify("user_123", { tier: "pro" });
+```
+
+That is enough to start sending analytics.
+
+If your app is not bundling npm modules, you can load the tracker with a plain
+script tag instead of importing `createAnalytics(...)` directly.
+
+Auto-init with one script tag:
+
+```html
+<script
+  defer
+  src="https://unpkg.com/@abdssamie/convex-analytics/dist/embed/convex-analytics.js"
+  data-endpoint="https://your-deployment.convex.site/analytics/ingest"
+  data-write-key="write_..."
+  data-auto-pageviews="true"
+></script>
+```
+
+Or initialize it manually:
+
+```html
+<script src="https://unpkg.com/@abdssamie/convex-analytics/dist/embed/convex-analytics.js"></script>
+<script>
+  window.ConvexAnalytics.init({
+    endpoint: "https://your-deployment.convex.site/analytics/ingest",
+    writeKey: "write_...",
+    autoPageviews: false,
+  });
+
+  window.ConvexAnalytics.page();
+</script>
+```
+
+Available browser globals:
+
+- `window.ConvexAnalytics.init(...)`
+- `window.ConvexAnalytics.page(...)`
+- `window.ConvexAnalytics.track(...)`
+- `window.ConvexAnalytics.identify(...)`
+- `window.ConvexAnalytics.flush()`
+
+Component stores only `writeKeyHash`, not the raw write key.
+
+The browser write key is an ingest credential, not an admin secret. Treat it like
+a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
+it if leaked.
+
+## Troubleshooting
+
+### Browser shows a CORS error on `/analytics/ingest`
+
+Example:
+
+```text
+Access to fetch at 'https://your-deployment.convex.site/analytics/ingest'
+from origin 'http://localhost:3001' has been blocked by CORS policy:
+No 'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+The most common causes are:
+
+- the write key is wrong
+- the site was never created
+- the current origin is not allowed for that site
+
+Why this looks like CORS:
+
+- the ingest route checks the write key and site before returning CORS headers
+- when the request is rejected early, the browser often reports it as a CORS failure
+- so an "invalid write key" problem can look like a generic CORS error in DevTools
+
+What to check:
+
+1. Make sure you created the site:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
+
+2. Make sure the browser is using the same `writeKey` you used when creating the site.
+
+3. If you set `allowedOrigins`, make sure your current app origin is included:
+
+- `http://localhost:3000`
+- `http://localhost:3001`
+- your production domain
+
+4. If you changed the write key, rotate it or recreate the site config to match.
+
+### `components.convexAnalytics` is missing
+
+Run your Convex dev server first so generated component bindings exist:
+
+```sh
+npx convex dev
+```
+
+### Dashboard says the default site is not found
+
+You registered the component and queries, but the site record does not exist yet.
+Run:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
+
+## Add the Dashboard
+
+After the component and `default` site are set up, expose the read API from
+your Convex backend and protect it with auth.
+
+### Backend: expose dashboard queries
+
+```ts
+// convex/analytics.ts
+import { components } from "./_generated/api";
+import {
+  exposeAdminApi,
+  exposeAnalyticsApi,
+} from "@abdssamie/convex-analytics";
+
+const auth = async (ctx: { auth: { getUserIdentity: () => Promise<unknown> } }) => {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    throw new Error("Unauthorized");
+  }
+};
+
+export const { getSiteBySlug } = exposeAdminApi(components.convexAnalytics, {
+  auth: async (ctx) => auth(ctx),
+});
 
 export const {
   getDashboardSummary,
   getOverview,
   getTimeseries,
-  getEventPropertyBreakdown,
   getTopPages,
   getTopReferrers,
   getTopSources,
@@ -128,107 +301,66 @@ export const {
 } = exposeAnalyticsApi(components.convexAnalytics, {
   auth: async (ctx, operation) => {
     await auth(ctx);
-    // Add site ownership checks here for operation.siteId.
-  },
-});
-
-export const {
-  createSite,
-  updateSite,
-  rotateWriteKey,
-  getSiteBySlug,
-  cleanupSite,
-} = exposeAdminApi(components.convexAnalytics, {
-  auth: async (ctx) => auth(ctx),
-});
-```
-
-Add default maintenance wrappers once:
-
-```ts
-// convex/cleanup.ts
-import { components } from "./_generated/api";
-import { internalAction } from "./_generated/server";
-import { v } from "convex/values";
-import { runCleanupSite } from "@abdssamie/convex-analytics";
-
-export const site = internalAction({
-  args: {
-    siteId: v.optional(v.string()),
-    slug: v.optional(v.string()),
-    now: v.optional(v.number()),
-    limit: v.optional(v.number()),
-    runUntilComplete: v.optional(v.boolean()),
-  },
-  handler: async (ctx, args) => {
-    return await runCleanupSite(ctx, components.convexAnalytics, args);
+    // Add your own site ownership check here for operation.siteId.
   },
 });
 ```
 
-Then register default crons:
+### Frontend: render the dashboard
 
-```ts
-// convex/crons.ts
-import { cronJobs } from "convex/server";
-import { internal } from "./_generated/api";
-import { registerDefaultAnalyticsCrons } from "@abdssamie/convex-analytics";
+```tsx
+import { AnalyticsDashboard } from "@abdssamie/convex-analytics/react";
+import { useQuery } from "convex/react";
+import { api } from "../convex/_generated/api";
 
-const crons = cronJobs();
+export function DashboardPage() {
+  const site = useQuery(api.analytics.getSiteBySlug, { slug: "default" });
 
-registerDefaultAnalyticsCrons(
-  crons,
-  {
-    cleanupSite: internal.cleanup.site,
-  },
-  {
-    slug: "default",
-  },
-);
+  if (site === undefined) {
+    return <div>Loading...</div>;
+  }
 
-export default crons;
+  if (site === null) {
+    return <div>Default analytics site not found.</div>;
+  }
+
+  return (
+    <AnalyticsDashboard
+      siteId={site._id}
+      api={{
+        getDashboardSummary: api.analytics.getDashboardSummary,
+        getOverview: api.analytics.getOverview,
+        getTimeseries: api.analytics.getTimeseries,
+        getTopPages: api.analytics.getTopPages,
+        getTopReferrers: api.analytics.getTopReferrers,
+        getTopSources: api.analytics.getTopSources,
+        getTopMediums: api.analytics.getTopMediums,
+        getTopCampaigns: api.analytics.getTopCampaigns,
+        getTopEvents: api.analytics.getTopEvents,
+        getTopDevices: api.analytics.getTopDevices,
+        getTopBrowsers: api.analytics.getTopBrowsers,
+        getTopOs: api.analytics.getTopOs,
+        getTopCountries: api.analytics.getTopCountries,
+        listRawEvents: api.analytics.listRawEvents,
+        listPageviews: api.analytics.listPageviews,
+        listSessions: api.analytics.listSessions,
+        listVisitors: api.analytics.listVisitors,
+      }}
+    />
+  );
+}
 ```
 
-Register the ingest route directly:
+The dashboard itself does not handle authentication. Auth belongs in your
+backend wrappers, and the React component reads only from those authenticated
+queries.
+
+## Dashboard API
+
+When you want to read analytics in your app, expose only the read functions:
 
 ```ts
-// convex/http.ts
-import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
-import { registerRoutes } from "@abdssamie/convex-analytics";
-
-const http = httpRouter();
-
-registerRoutes(http, components.convexAnalytics);
-
-export default http;
-```
-
-Create the site once during setup or deployment:
-
-```sh
-npx convex run analytics:provisionDefaultSite
-```
-
-That is enough for normal installs.
-Default helper runs bounded cleanup batches on each cron tick. Use
-`runUntilComplete: true` only for explicit backfills or catch-up work.
-
-`provisionDefaultSite` is idempotent: if the `default` site already exists, it
-returns the existing site instead of trying to create it again.
-
-For multiple sites on same Convex deployment, use `createSite(...)`
-for additional slugs with separate write keys and origins.
-
-Component stores only `writeKeyHash`, not raw write keys.
-
-The browser write key is an ingest credential, not an admin secret. Treat it like
-a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
-it if leaked.
-
-If you prefer fully manual wiring, the low-level wrappers are still available:
-
-```ts
+// convex/analytics.ts
 import { components } from "./_generated/api";
 import { exposeAnalyticsApi } from "@abdssamie/convex-analytics";
 
@@ -262,19 +394,6 @@ export const {
 });
 ```
 
-## Dashboard API
-
-Recommended pieces:
-
-- `provisionSite(...)` for one idempotent site bootstrap mutation
-- `registerRoutes(...)` for HTTP ingest
-- `exposeAnalyticsApi(...)` for read/dashboard wrappers
-- `exposeAdminApi(...)` for admin/repair wrappers
-
-If you want lower-level control, `exposeApi(...)` gives app-facing wrappers
-around component functions, and `exposeAnalyticsApi(...)` gives the read-only
-dashboard surface.
-
 Dashboard surface:
 
 - `getDashboardSummary(siteId, from, to, interval)`
@@ -296,8 +415,11 @@ Dashboard surface:
 - `listSessions(siteId, from?, to?, paginationOpts)`
 - `listVisitors(siteId, from?, to?, paginationOpts)`
 
-Admin/repair functions exist too, but they are separate from dashboard reads.
-Use `exposeAdminApi(...)` only in backend/admin modules:
+## Advanced: Site Admin API
+
+You do not need this for the initial install.
+
+Use `exposeAdminApi(...)` only if your app needs site management:
 
 ```ts
 import { components } from "./_generated/api";
@@ -373,8 +495,10 @@ registerRoutes(http, components.convexAnalytics, {
 });
 ```
 
+## Advanced: Cleanup and Retention
+
 Cleanup is explicit so you control request volume and billing. For most apps,
-use the default helper above and stop thinking about it.
+add one cleanup action and one cron and stop thinking about it.
 
 If you want custom schedules, this is the manual shape:
 

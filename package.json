@@ -19,8 +19,9 @@
     "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'npm run build:codegen' --initial",
     "predev": "convex init && npm run build:codegen",
     "build": "tsc --build ./tsconfig.build.json --force",
+    "build:embed": "node scripts/build-embed.mjs",
     "build:codegen": "npx convex codegen --component-dir ./src/component && npm run build",
-    "build:clean": "rm -rf dist *.tsbuildinfo && npm run build:codegen",
+    "build:clean": "rm -rf dist *.tsbuildinfo && npm run build:codegen && npm run build:embed",
     "typecheck": "tsc --noEmit && tsc -p example && tsc -p example/convex",
     "lint": "oxlint .",
     "test": "vitest run --typecheck",
@@ -40,12 +41,16 @@
     "dist",
     "src"
   ],
+  "unpkg": "./dist/embed/convex-analytics.js",
+  "jsdelivr": "./dist/embed/convex-analytics.js",
   "exports": {
     "./package.json": "./package.json",
     ".": {
       "types": "./dist/client/index.d.ts",
       "default": "./dist/client/index.js"
     },
+    "./embed": "./dist/embed/convex-analytics.js",
+    "./embed.js": "./dist/embed/convex-analytics.js",
     "./react": {
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
