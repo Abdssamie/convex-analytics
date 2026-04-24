@@ -599,7 +599,13 @@ The default ingest path is built to avoid unnecessary Convex usage:
 - Cleanup uses indexed, bounded batches and keeps daily rollups by default.
 - Event properties can be allowlisted or denied per site.
 - Raw IP addresses are not persisted by this component.
-- Country enrichment is header-only by default. Third-party lookup is opt-in.
+
+## Note
+
+While this component has been optimized to reduce convex usage cost, if you 
+have many users or except to do so, then consider another service 
+as convex-analytics hasn't been tested for large scale usage, but most 
+developers don't have to bother about this.
 
 ## Publishing
 
