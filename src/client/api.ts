@@ -70,6 +70,64 @@ export function exposeAdminApi(
   };
 }
 
+export function provisionSite(
+  component: ComponentApi,
+  options: {
+    auth: AuthFn;
+    site: {
+      slug: string;
+      name: string;
+      writeKey: string;
+      allowedOrigins?: string[];
+      sessionTimeoutMs?: number;
+      retentionDays?: number;
+      rawEventRetentionDays?: number;
+      hourlyRollupRetentionDays?: number;
+      dailyRollupRetentionDays?: number;
+      allowedPropertyKeys?: string[];
+      deniedPropertyKeys?: string[];
+    };
+  },
+) {
+  return mutationGeneric({
+    args: {},
+    handler: async (ctx) => {
+      await options.auth(ctx, { type: "admin" });
+
+      const existing = await ctx.runQuery(component.sites.getSiteBySlug, {
+        slug: options.site.slug,
+      });
+      if (existing) {
+        return {
+          siteId: existing._id,
+          slug: existing.slug,
+          created: false,
+        };
+      }
+
+      const siteId = await ctx.runMutation(component.sites.createSite, {
+        slug: options.site.slug,
+        name: options.site.name,
+        writeKeyHash: await hashWriteKey(options.site.writeKey),
+        allowedOrigins: options.site.allowedOrigins,
+        sessionTimeoutMs: options.site.sessionTimeoutMs,
+        retentionDays: options.site.retentionDays,
+        rawEventRetentionDays: options.site.rawEventRetentionDays,
+        hourlyRollupRetentionDays: options.site.hourlyRollupRetentionDays,
+        dailyRollupRetentionDays: options.site.dailyRollupRetentionDays,
+        allowedPropertyKeys: options.site.allowedPropertyKeys,
+        deniedPropertyKeys: options.site.deniedPropertyKeys,
+      });
+
+      return {
+        siteId,
+        slug: options.site.slug,
+        created: true,
+      };
+    },
+  });
+}
+
 export function exposeApi(
   component: ComponentApi,
   options: {

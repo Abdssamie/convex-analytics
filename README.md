@@ -67,7 +67,7 @@ Install the component in `convex/convex.config.ts`:
 
 ```ts
 import { defineApp } from "convex/server";
-import convexAnalytics from "@Abdssamie/convex-analytics/convex.config.js";
+import convexAnalytics from "@abdssamie/convex-analytics/convex.config.js";
 
 const app = defineApp();
 app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });
@@ -75,54 +75,72 @@ app.use(convexAnalytics, { httpPrefix: "/analytics-component/" });
 export default app;
 ```
 
-Create site once from backend/admin code, then register HTTP ingest route in
-`convex/http.ts`. Browser callers cannot create or modify sites.
+Recommended app integration: keep the pieces separate, but use a tiny
+idempotent provisioning helper for the default site so you do not have to wire
+`getSiteBySlug` and `createSite` manually.
 
 ```ts
-// convex/example.ts
+// convex/analytics.ts
 import { components } from "./_generated/api";
-import { exposeAdminApi } from "@Abdssamie/convex-analytics";
+import {
+  exposeAdminApi,
+  exposeAnalyticsApi,
+  provisionSite,
+} from "@abdssamie/convex-analytics";
 
-export const { createSite } = exposeAdminApi(components.convexAnalytics, {
-  auth: async () => {},
-});
-```
+const auth = async (ctx: { auth: { getUserIdentity: () => Promise<unknown> } }) => {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    throw new Error("Unauthorized");
+  }
+  // Add your own site ownership / admin checks here when needed.
+};
 
-Run `createSite(...)` one time per tracked site. After that, ingest route only
-accepts events for already-created sites.
-
-For quick example/demo setup, expose tiny bootstrap mutation and run it once:
-
-```ts
-export const setupDefaultSite = mutation({
-  args: {},
-  handler: async (ctx) => {
-    return await ctx.runMutation(components.convexAnalytics.sites.createSite, {
-      slug: "default",
-      name: "Default site",
-      writeKeyHash: await hashWriteKey(process.env.ANALYTICS_WRITE_KEY!),
-      allowedOrigins: [],
-    });
+export const provisionDefaultSite = provisionSite(components.convexAnalytics, {
+  auth: async (ctx) => auth(ctx),
+  site: {
+    slug: "default",
+    name: "Default site",
+    writeKey: process.env.ANALYTICS_WRITE_KEY!,
+    allowedOrigins: [],
   },
 });
-```
 
-```sh
-npx convex run example:setupDefaultSite
-```
-
-```ts
-import { httpRouter } from "convex/server";
-import { components } from "./_generated/api";
-import { registerRoutes } from "@Abdssamie/convex-analytics";
-
-const http = httpRouter();
-
-registerRoutes(http, components.convexAnalytics, {
-  path: "/analytics/ingest",
+export const {
+  getDashboardSummary,
+  getOverview,
+  getTimeseries,
+  getEventPropertyBreakdown,
+  getTopPages,
+  getTopReferrers,
+  getTopSources,
+  getTopMediums,
+  getTopCampaigns,
+  getTopEvents,
+  getTopDevices,
+  getTopBrowsers,
+  getTopOs,
+  getTopCountries,
+  listRawEvents,
+  listPageviews,
+  listSessions,
+  listVisitors,
+} = exposeAnalyticsApi(components.convexAnalytics, {
+  auth: async (ctx, operation) => {
+    await auth(ctx);
+    // Add site ownership checks here for operation.siteId.
+  },
 });
 
-export default http;
+export const {
+  createSite,
+  updateSite,
+  rotateWriteKey,
+  getSiteBySlug,
+  cleanupSite,
+} = exposeAdminApi(components.convexAnalytics, {
+  auth: async (ctx) => auth(ctx),
+});
 ```
 
 Add default maintenance wrappers once:
@@ -132,7 +150,7 @@ Add default maintenance wrappers once:
 import { components } from "./_generated/api";
 import { internalAction } from "./_generated/server";
 import { v } from "convex/values";
-import { runCleanupSite } from "@Abdssamie/convex-analytics";
+import { runCleanupSite } from "@abdssamie/convex-analytics";
 
 export const site = internalAction({
   args: {
@@ -154,7 +172,7 @@ Then register default crons:
 // convex/crons.ts
 import { cronJobs } from "convex/server";
 import { internal } from "./_generated/api";
-import { registerDefaultAnalyticsCrons } from "@Abdssamie/convex-analytics";
+import { registerDefaultAnalyticsCrons } from "@abdssamie/convex-analytics";
 
 const crons = cronJobs();
 
@@ -171,12 +189,36 @@ registerDefaultAnalyticsCrons(
 export default crons;
 ```
 
+Register the ingest route directly:
+
+```ts
+// convex/http.ts
+import { httpRouter } from "convex/server";
+import { components } from "./_generated/api";
+import { registerRoutes } from "@abdssamie/convex-analytics";
+
+const http = httpRouter();
+
+registerRoutes(http, components.convexAnalytics);
+
+export default http;
+```
+
+Create the site once during setup or deployment:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
+
 That is enough for normal installs.
 Default helper runs bounded cleanup batches on each cron tick. Use
 `runUntilComplete: true` only for explicit backfills or catch-up work.
 
-For multiple sites on same Convex deployment, call `createSite(...)` once for
-each site with separate write keys and origins.
+`provisionDefaultSite` is idempotent: if the `default` site already exists, it
+returns the existing site instead of trying to create it again.
+
+For multiple sites on same Convex deployment, use `createSite(...)`
+for additional slugs with separate write keys and origins.
 
 Component stores only `writeKeyHash`, not raw write keys.
 
@@ -184,11 +226,11 @@ The browser write key is an ingest credential, not an admin secret. Treat it lik
 a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
 it if leaked.
 
-Expose report/admin wrappers only if your app needs them:
+If you prefer fully manual wiring, the low-level wrappers are still available:
 
 ```ts
 import { components } from "./_generated/api";
-import { exposeAnalyticsApi } from "@Abdssamie/convex-analytics";
+import { exposeAnalyticsApi } from "@abdssamie/convex-analytics";
 
 export const {
   getDashboardSummary,
@@ -222,8 +264,16 @@ export const {
 
 ## Dashboard API
 
-`exposeApi(...)` gives installers ergonomic app-facing wrappers around component
-functions. For dashboard/read-only app surface, use `exposeAnalyticsApi(...)`.
+Recommended pieces:
+
+- `provisionSite(...)` for one idempotent site bootstrap mutation
+- `registerRoutes(...)` for HTTP ingest
+- `exposeAnalyticsApi(...)` for read/dashboard wrappers
+- `exposeAdminApi(...)` for admin/repair wrappers
+
+If you want lower-level control, `exposeApi(...)` gives app-facing wrappers
+around component functions, and `exposeAnalyticsApi(...)` gives the read-only
+dashboard surface.
 
 Dashboard surface:
 
@@ -251,7 +301,7 @@ Use `exposeAdminApi(...)` only in backend/admin modules:
 
 ```ts
 import { components } from "./_generated/api";
-import { exposeAdminApi } from "@Abdssamie/convex-analytics";
+import { exposeAdminApi } from "@abdssamie/convex-analytics";
 
 export const {
   createSite,
@@ -377,7 +427,7 @@ normal production cron, keep it unset and let each run delete a bounded batch.
 Use the browser helper in your frontend:
 
 ```ts
-import { createAnalytics } from "@Abdssamie/convex-analytics";
+import { createAnalytics } from "@abdssamie/convex-analytics";
 
 const analytics = createAnalytics({
   endpoint: "https://your-deployment.convex.site/analytics/ingest",
@@ -430,6 +480,7 @@ Release scripts:
 
 - `npm run alpha`
 - `npm run release`
+- `npm run verify:release`
 
 Both go through `preversion`, which runs:
 
@@ -439,9 +490,17 @@ Both go through `preversion`, which runs:
 - `npm run lint`
 - `npm run typecheck`
 
-Current `npm version` flow also runs the package `version` script, which opens
-`CHANGELOG.md` in `vim`. Adjust that script if you want a fully non-interactive
-release flow in CI.
+`npm run verify:release` adds `npm pack` on top, matching CI.
+
+The package `version` script is non-interactive now. It just formats
+`CHANGELOG.md` and stages it if needed.
+
+GitHub Actions automation:
+
+- `CI` runs on every push to `main`, pull request, and manual dispatch.
+- `Publish` runs on `v*` tags and manual dispatch.
+- `Publish` requires an `NPM_TOKEN` repository secret.
+- Tag-based publish verifies that `vX.Y.Z` matches `package.json` version `X.Y.Z`.
 
 ## Development
 

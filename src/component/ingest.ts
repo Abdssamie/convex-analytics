@@ -271,7 +271,7 @@ export async function aggregateEventsByIds(
 				aggregatedAt: now,
 			});
 			aggregated += 1;
-		} catch (error) {
+		} catch {
 			failed += 1;
 		}
 	}

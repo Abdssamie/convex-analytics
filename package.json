@@ -1,12 +1,12 @@
 {
-  "name": "@Abdssamie/convex-analytics",
+  "name": "@abdssamie/convex-analytics",
   "description": "A convex analytics component for Convex.",
   "repository": "github:Abdssamie/convex-analytics",
   "homepage": "https://github.com/Abdssamie/convex-analytics#readme",
   "bugs": {
     "url": "https://github.com/Abdssamie/convex-analytics/issues"
   },
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -29,10 +29,12 @@
     "test:coverage": "vitest run --coverage --coverage.reporter=text",
     "perf:playwright": "playwright test -c playwright.load.config.ts",
     "perf:k6": "k6 run perf/k6/analytics-ingest.js",
+    "verify:release": "npm run build:clean && npm run lint && npm run typecheck && npm test && npm pack",
     "preversion": "npm ci && npm run build:clean && npm run test && npm run lint && npm run typecheck",
     "alpha": "npm version prerelease --preid alpha && npm publish --tag alpha && git push --follow-tags",
     "release": "npm version patch && npm publish && git push --follow-tags",
-    "version": "(npm whoami || npm login) && vim -c 'normal o' -c 'normal o## '$npm_package_version CHANGELOG.md && prettier -w CHANGELOG.md && git add CHANGELOG.md"
+    "version": "prettier -w CHANGELOG.md && git add CHANGELOG.md",
+    "prepublishOnly": "npm run build:clean"
   },
   "files": [
     "dist",

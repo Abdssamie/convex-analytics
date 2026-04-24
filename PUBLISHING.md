@@ -39,9 +39,9 @@ In package.json, there are some scripts that are useful for doing releases.
 
 - `preversion` will run the tests and typecheck the code before marking a new
   version.
-- `version` will open the changelog in vim and then save it before committing
-  the new version.
+- `version` will format and stage `CHANGELOG.md`.
 - `prepublishOnly` will make a clean build of the package before publishing.
+- `verify:release` runs build, lint, typecheck, tests, and `npm pack`.
 
 These are not required and can be modified or removed if desired. They will all
 be run automatically when using one of the deployment commands.
@@ -71,6 +71,13 @@ npm version minor # or major
 npm publish
 git push --follow-tags
 ```
+
+## GitHub Actions automation
+
+- `CI` runs `npm run verify:release` on pushes to `main`, pull requests, and manual dispatch.
+- `Publish` runs on `v*` tags and manual dispatch.
+- Set the repository secret `NPM_TOKEN` before using the publish workflow.
+- For tag-triggered publish, the workflow verifies that the tag version matches `package.json`.
 
 ## Building a one-off package
 
