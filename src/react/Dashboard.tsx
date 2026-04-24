@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "convex/react";
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 
 import { INTERVALS, NAV, S } from "./dashboard/constants";
 import { Sidebar } from "./dashboard/Sidebar";
@@ -37,74 +37,68 @@ export function AnalyticsDashboard({
   const [rangeIdx, setRangeIdx] = useState(1);
   const range = INTERVALS[rangeIdx];
 
-  const to = useMemo(
-    () => Math.floor(Date.now() / 60_000) * 60_000,
-    [rangeIdx],
-  );
-  const from = to - range.ms;
-
   const summary = useQuery(
     api.getDashboardSummary,
     page === "overview"
-      ? { siteId, from, to, interval: range.interval }
+      ? { siteId, windowMs: range.ms, interval: range.interval }
       : "skip",
   ) as DashboardSummary | undefined;
 
   const pvTimeseries = useQuery(
     api.getTimeseries,
     page === "pageviews"
-      ? { siteId, from, to, interval: range.interval }
+      ? { siteId, windowMs: range.ms, interval: range.interval }
       : "skip",
   ) as TimeseriesPoint[] | undefined;
 
   const pvTopPages = useQuery(
     api.getTopPages,
-    page === "pageviews" ? { siteId, from, to, limit: 20 } : "skip",
+    page === "pageviews" ? { siteId, windowMs: range.ms, limit: 20 } : "skip",
   ) as TopRow[] | undefined;
 
   const pvTopReferrers = useQuery(
     api.getTopReferrers,
-    page === "pageviews" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "pageviews" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const evTopEvents = useQuery(
     api.getTopEvents,
-    page === "events" ? { siteId, from, to, limit: 15 } : "skip",
+    page === "events" ? { siteId, windowMs: range.ms, limit: 15 } : "skip",
   ) as TopRow[] | undefined;
 
   const evTopMediums = useQuery(
     api.getTopMediums,
-    page === "events" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "events" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const evTopCampaigns = useQuery(
     api.getTopCampaigns,
-    page === "events" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "events" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const visCountries = useQuery(
     api.getTopCountries,
-    page === "visitors" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "visitors" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const visBrowsers = useQuery(
     api.getTopBrowsers,
-    page === "visitors" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "visitors" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const visDevices = useQuery(
     api.getTopDevices,
-    page === "visitors" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "visitors" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const visOs = useQuery(
     api.getTopOs,
-    page === "visitors" ? { siteId, from, to, limit: 10 } : "skip",
+    page === "visitors" ? { siteId, windowMs: range.ms, limit: 10 } : "skip",
   ) as TopRow[] | undefined;
 
   const sessOverview = useQuery(
     api.getOverview,
-    page === "sessions" ? { siteId, from, to } : "skip",
+    page === "sessions" ? { siteId, windowMs: range.ms } : "skip",
   ) as OverviewStats | undefined;
 
   const PAGE_LABELS: Record<Page, string> = {
@@ -173,7 +167,7 @@ export function AnalyticsDashboard({
             <div>
               <div style={{ fontSize: 16, fontWeight: 700 }}>{PAGE_LABELS[page]}</div>
               <div style={{ fontSize: 12, color: S.textMut, marginTop: 2 }}>
-                Rolling window, refreshed each minute
+                Rolling window, follows latest ingested data
               </div>
             </div>
           </div>
@@ -221,47 +215,43 @@ export function AnalyticsDashboard({
           )}
           {page === "pageviews" && (
             <PageViewsPage
-              siteId={siteId}
-              api={api}
-              from={from}
-              to={to}
-              timeseries={pvTimeseries}
-              topPages={pvTopPages}
-              topReferrers={pvTopReferrers}
+                siteId={siteId}
+                api={api}
+                windowMs={range.ms}
+                timeseries={pvTimeseries}
+                topPages={pvTopPages}
+                topReferrers={pvTopReferrers}
               range={range}
             />
           )}
           {page === "events" && (
             <EventsPage
-              siteId={siteId}
-              api={api}
-              from={from}
-              to={to}
-              topEvents={evTopEvents}
-              topMediums={evTopMediums}
-              topCampaigns={evTopCampaigns}
+                siteId={siteId}
+                api={api}
+                windowMs={range.ms}
+                topEvents={evTopEvents}
+                topMediums={evTopMediums}
+                topCampaigns={evTopCampaigns}
             />
           )}
           {page === "visitors" && (
             <VisitorsPage
-              siteId={siteId}
-              api={api}
-              from={from}
-              to={to}
-              topCountries={visCountries}
-              topBrowsers={visBrowsers}
-              topDevices={visDevices}
+                siteId={siteId}
+                api={api}
+                windowMs={range.ms}
+                topCountries={visCountries}
+                topBrowsers={visBrowsers}
+                topDevices={visDevices}
               topOs={visOs}
             />
           )}
           {page === "sessions" && (
             <SessionsPage
-              siteId={siteId}
-              api={api}
-              from={from}
-              to={to}
-              overview={sessOverview}
-            />
+                siteId={siteId}
+                api={api}
+                windowMs={range.ms}
+                overview={sessOverview}
+              />
           )}
         </div>
       </div>

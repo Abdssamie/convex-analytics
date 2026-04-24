@@ -2,21 +2,19 @@ import { usePaginatedQuery } from "convex/react";
 
 import { S, SECTION_ICONS } from "../constants";
 import { Card, LoadMoreBtn, SectionTitle, TopList, tdSty, thSty, tableSty, tableWrapSty } from "../primitives";
-import type { AnalyticsDashboardProps, TopRow } from "../types";
+import type { AnalyticsDashboardProps, RawEventRow, TopRow } from "../types";
 
 export function EventsPage({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
   topEvents,
   topMediums,
   topCampaigns,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
   topEvents: TopRow[] | undefined;
   topMediums: TopRow[] | undefined;
   topCampaigns: TopRow[] | undefined;
@@ -35,7 +33,7 @@ export function EventsPage({
         <TopList title="Top Mediums" data={topMediums} barColor={S.greenStrong} />
         <TopList title="Top Campaigns" data={topCampaigns} barColor={S.greenStrong} />
       </div>
-      <RawEventsFeed siteId={siteId} api={api} from={from} to={to} />
+      <RawEventsFeed siteId={siteId} api={api} windowMs={windowMs} />
     </>
   );
 }
@@ -43,19 +41,18 @@ export function EventsPage({
 function RawEventsFeed({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
 }) {
   const { results, status, loadMore } = usePaginatedQuery(
     api.listRawEvents,
-    { siteId, from, to },
+    { siteId, windowMs },
     { initialNumItems: 25 },
   );
+  const events = results as RawEventRow[];
 
   const badge = (type: string) => {
     const map: Record<string, [string, string]> = {
@@ -85,7 +82,7 @@ function RawEventsFeed({
   return (
     <Card>
       <SectionTitle icon={SECTION_ICONS["Raw Event Feed"]}>Raw Event Feed</SectionTitle>
-      {results.length === 0 && status === "Exhausted" ? (
+      {events.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No events in this period.
         </div>
@@ -102,12 +99,12 @@ function RawEventsFeed({
               </tr>
             </thead>
             <tbody>
-              {results.map((ev: any) => (
-                <tr key={ev._id}>
-                  <td style={{ ...tdSty, fontWeight: 500 }}>{ev.eventName}</td>
-                  <td style={tdSty}>{badge(ev.eventType)}</td>
-                  <td style={{ ...tdSty, color: S.textSec }} title={ev.path ?? ""}>
-                    {ev.path ?? ""}
+              {events.map((event) => (
+                <tr key={event._id}>
+                  <td style={{ ...tdSty, fontWeight: 500 }}>{event.eventName}</td>
+                  <td style={tdSty}>{badge(event.eventType)}</td>
+                  <td style={{ ...tdSty, color: S.textSec }} title={event.path ?? ""}>
+                    {event.path ?? ""}
                   </td>
                   <td
                     style={{
@@ -116,9 +113,9 @@ function RawEventsFeed({
                       color: S.textSec,
                       whiteSpace: "nowrap",
                     }}
-                    title={ev.visitorId}
+                    title={event.visitorId}
                   >
-                    {ev.visitorId}
+                    {event.visitorId}
                   </td>
                   <td
                     style={{
@@ -128,7 +125,7 @@ function RawEventsFeed({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {new Date(ev.occurredAt).toLocaleString()}
+                    {new Date(event.occurredAt).toLocaleString()}
                   </td>
                 </tr>
               ))}

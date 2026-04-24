@@ -2,13 +2,12 @@ import { usePaginatedQuery } from "convex/react";
 
 import { S, SECTION_ICONS } from "../constants";
 import { Card, LoadMoreBtn, SectionTitle, TopList, tdSty, thSty, tableSty, tableWrapSty } from "../primitives";
-import type { AnalyticsDashboardProps, TopRow } from "../types";
+import type { AnalyticsDashboardProps, TopRow, VisitorRow } from "../types";
 
 export function VisitorsPage({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
   topCountries,
   topBrowsers,
   topDevices,
@@ -16,8 +15,7 @@ export function VisitorsPage({
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
   topCountries: TopRow[] | undefined;
   topBrowsers: TopRow[] | undefined;
   topDevices: TopRow[] | undefined;
@@ -56,7 +54,7 @@ export function VisitorsPage({
         <TopList title="OS" data={topOs} barColor={S.greenStrong} />
       </div>
 
-      <VisitorsFeed siteId={siteId} api={api} from={from} to={to} />
+      <VisitorsFeed siteId={siteId} api={api} windowMs={windowMs} />
     </>
   );
 }
@@ -64,23 +62,22 @@ export function VisitorsPage({
 function VisitorsFeed({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
 }) {
   const { results, status, loadMore } = usePaginatedQuery(
     api.listVisitors,
-    { siteId, from, to },
+    { siteId, windowMs },
     { initialNumItems: 25 },
   );
+  const visitors = results as VisitorRow[];
   return (
     <Card>
       <SectionTitle icon={SECTION_ICONS.Visitors}>Visitors</SectionTitle>
-      {results.length === 0 && status === "Exhausted" ? (
+      {visitors.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No visitors in this period.
         </div>
@@ -96,13 +93,13 @@ function VisitorsFeed({
               </tr>
             </thead>
             <tbody>
-              {results.map((v: any) => (
-                <tr key={v._id}>
+              {visitors.map((visitor) => (
+                <tr key={visitor._id}>
                   <td
                     style={{ ...tdSty, fontFamily: "monospace", whiteSpace: "nowrap" }}
-                    title={v.visitorId}
+                    title={visitor.visitorId}
                   >
-                    {v.visitorId}
+                    {visitor.visitorId}
                   </td>
                   <td
                     style={{
@@ -111,7 +108,7 @@ function VisitorsFeed({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {new Date(v.firstSeenAt).toLocaleString()}
+                    {new Date(visitor.firstSeenAt).toLocaleString()}
                   </td>
                   <td
                     style={{
@@ -120,16 +117,16 @@ function VisitorsFeed({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {new Date(v.lastSeenAt).toLocaleString()}
+                    {new Date(visitor.lastSeenAt).toLocaleString()}
                   </td>
                   <td
                     style={{
                       ...tdSty,
-                      color: v.identifiedUserId ? S.textPri : S.textMut,
+                      color: visitor.identifiedUserId ? S.textPri : S.textMut,
                     }}
-                    title={v.identifiedUserId ?? "—"}
+                    title={visitor.identifiedUserId ?? "—"}
                   >
-                    {v.identifiedUserId ?? "—"}
+                    {visitor.identifiedUserId ?? "—"}
                   </td>
                 </tr>
               ))}

@@ -7,68 +7,31 @@ sessions, raw event history, and async rollup-backed reports.
 This component is designed for apps that want Rybbit-style core analytics
 without running a separate analytics service.
 
-## What It Tracks
-
-- Pageviews
-- Custom product events
-- Anonymous visitors
-- Sessions
-- `identify(userId, traits)` links
-- Referrers and UTM campaign fields
-- Top pages, events, referrers, and campaigns
-- Overview and timeseries reports
-
-## Architecture
-
-The component owns its own Convex tables:
-
-- `sites`: one tracked site/app per write key
-- `visitors`: durable anonymous visitor records
-- `sessions`: session windows and coarse device/browser/country summary
-- `events`: append-only raw events with lightweight aggregation marker
-- `rollups`: hourly/daily report counters
-
-```mermaid
-flowchart LR
-    Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
-    Http --> Ingest["ingestBatch\nappend-only raw event insert"]
-    Ingest --> Events[("events")]
-    Ingest --> Worker["reducePendingSiteEvents"]
-    Worker --> Visitors[("visitors")]
-    Worker --> Sessions[("sessions")]
-    Worker --> Rollups[("rollups\nhourly + daily")]
-    Rollups --> Dashboard["Dashboard queries\ngetOverview/getTimeseries/top lists"]
-    Events --> Dashboard
-    Sessions --> Dashboard
-```
-
-Why `sites` exists: one Convex deployment can track multiple sites or apps.
-For the common one-site case, create one site named `default` and ignore the
-multi-site parts until needed.
-
-Browser traffic should use HTTP ingest route. Do not send every browser event
-through public Convex mutations. SDK batches events and HTTP route hashes write
-key before calling component.
-
-Ingest and reporting are split on purpose. `ingestBatch` writes raw events
-quickly, leaves `aggregatedAt: null`, and schedules background aggregation. The
-worker materializes visitors, sessions, and rollups, then stamps
-`aggregatedAt`.
-
-Dashboard queries are range-aware:
-
-- overview and top-dimension queries use exact edge handling
-- first/last timeseries bucket is clipped to requested range
-- raw events can lag by worker time, usually a few seconds
-
 ## Quick Start
 
-Most apps only need 4 things:
+Most apps only need 5 things:
 
 1. Install the component in `convex/convex.config.ts`
 2. Register the ingest route in `convex/http.ts`
-3. Create one site named `default`
-4. Use the browser SDK in your frontend
+3. Set one analytics write key
+4. Send events from the browser with that same key
+5. Render the dashboard
+
+### Before you start: one write key, two places
+
+Generate one write key for your site.
+
+You will use that same raw key in two places:
+
+- server-side when creating the site
+- browser-side when sending ingest requests
+
+Suggested env vars:
+
+- Convex env: `ANALYTICS_WRITE_KEY`
+- frontend env: `NEXT_PUBLIC_ANALYTICS_WRITE_KEY` or `VITE_ANALYTICS_WRITE_KEY`
+
+If those two values do not match, events will not be ingested.
 
 ### 1. Install the Convex component
 
@@ -133,14 +96,14 @@ npx convex run analytics:provisionDefaultSite
 `provisionDefaultSite` is idempotent. If `default` already exists, nothing breaks.
 It also fails fast if your analytics write key env var is missing or empty.
 
-### 4. Use the browser SDK
+### 4. Send events from the browser
 
 ```ts
 import { createAnalytics } from "@abdssamie/convex-analytics";
 
 const analytics = createAnalytics({
   endpoint: "https://your-deployment.convex.site/analytics/ingest",
-  writeKey: "write_...",
+  writeKey: process.env.NEXT_PUBLIC_ANALYTICS_WRITE_KEY!,
   autoPageviews: false,
 });
 
@@ -159,7 +122,7 @@ Auto-init with one script tag:
 ```html
 <script
   defer
-  src="https://unpkg.com/@abdssamie/convex-analytics/dist/embed/convex-analytics.js"
+  src="https://unpkg.com/@abdssamie/convex-analytics@0.1.2/dist/embed/convex-analytics.js"
   data-endpoint="https://your-deployment.convex.site/analytics/ingest"
   data-write-key="write_..."
   data-auto-pageviews="true"
@@ -169,7 +132,7 @@ Auto-init with one script tag:
 Or initialize it manually:
 
 ```html
-<script src="https://unpkg.com/@abdssamie/convex-analytics/dist/embed/convex-analytics.js"></script>
+<script src="https://unpkg.com/@abdssamie/convex-analytics@0.1.2/dist/embed/convex-analytics.js"></script>
 <script>
   window.ConvexAnalytics.init({
     endpoint: "https://your-deployment.convex.site/analytics/ingest",
@@ -189,72 +152,7 @@ Available browser globals:
 - `window.ConvexAnalytics.identify(...)`
 - `window.ConvexAnalytics.flush()`
 
-Component stores only `writeKeyHash`, not the raw write key.
-
-The browser write key is an ingest credential, not an admin secret. Treat it like
-a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
-it if leaked.
-
-## Troubleshooting
-
-### Browser shows a CORS error on `/analytics/ingest`
-
-Example:
-
-```text
-Access to fetch at 'https://your-deployment.convex.site/analytics/ingest'
-from origin 'http://localhost:3001' has been blocked by CORS policy:
-No 'Access-Control-Allow-Origin' header is present on the requested resource.
-```
-
-The most common causes are:
-
-- the write key is wrong
-- the site was never created
-- the current origin is not allowed for that site
-
-Why this looks like CORS:
-
-- the ingest route checks the write key and site before returning CORS headers
-- when the request is rejected early, the browser often reports it as a CORS failure
-- so an "invalid write key" problem can look like a generic CORS error in DevTools
-
-What to check:
-
-1. Make sure you created the site:
-
-```sh
-npx convex run analytics:provisionDefaultSite
-```
-
-2. Make sure the browser is using the same `writeKey` you used when creating the site.
-
-3. If you set `allowedOrigins`, make sure your current app origin is included:
-
-- `http://localhost:3000`
-- `http://localhost:3001`
-- your production domain
-
-4. If you changed the write key, rotate it or recreate the site config to match.
-
-### `components.convexAnalytics` is missing
-
-Run your Convex dev server first so generated component bindings exist:
-
-```sh
-npx convex dev
-```
-
-### Dashboard says the default site is not found
-
-You registered the component and queries, but the site record does not exist yet.
-Run:
-
-```sh
-npx convex run analytics:provisionDefaultSite
-```
-
-## Add the Dashboard
+### 5. Render the dashboard
 
 After the component and `default` site are set up, expose the read API from
 your Convex backend and protect it with auth.
@@ -354,6 +252,115 @@ export function DashboardPage() {
 The dashboard itself does not handle authentication. Auth belongs in your
 backend wrappers, and the React component reads only from those authenticated
 queries.
+
+Component stores only `writeKeyHash`, not the raw write key.
+
+The browser write key is an ingest credential, not an admin secret. Treat it like
+a publishable key: make it long and random, restrict `allowedOrigins`, and rotate
+it if leaked.
+
+## What It Tracks
+
+- Pageviews
+- Custom product events
+- Anonymous visitors
+- Sessions
+- `identify(userId, traits)` links
+- Referrers and UTM campaign fields
+- Top pages, events, referrers, and campaigns
+- Overview and timeseries reports
+
+## Architecture
+
+The component owns its own Convex tables:
+
+- `sites`: one tracked site/app per write key
+- `visitors`: durable anonymous visitor records
+- `sessions`: session windows and coarse device/browser/country summary
+- `events`: append-only raw events with lightweight aggregation marker
+- `rollups`: hourly/daily report counters
+
+```mermaid
+flowchart LR
+    Browser["Browser SDK / HTTP client"] --> Http["HTTP ingest route"]
+    Http --> Ingest["ingestBatch\nappend-only raw event insert"]
+    Ingest --> Events[("events")]
+    Ingest --> Worker["reducePendingSiteEvents"]
+    Worker --> Visitors[("visitors")]
+    Worker --> Sessions[("sessions")]
+    Worker --> Rollups[("rollups\nhourly + daily")]
+    Rollups --> Dashboard["Dashboard queries\ngetOverview/getTimeseries/top lists"]
+    Events --> Dashboard
+    Sessions --> Dashboard
+```
+
+Why `sites` exists: one Convex deployment can track multiple sites or apps.
+For the common one-site case, create one site named `default` and ignore the
+multi-site parts until needed.
+
+Browser traffic should use HTTP ingest route. Do not send every browser event
+through public Convex mutations. SDK batches events and HTTP route hashes write
+key before calling component.
+
+Ingest and reporting are split on purpose. `ingestBatch` writes raw events
+quickly, leaves `aggregatedAt: null`, and schedules background aggregation. The
+worker materializes visitors, sessions, and rollups, then stamps
+`aggregatedAt`.
+
+Dashboard queries are range-aware:
+
+- overview and top-dimension queries use exact edge handling
+- first/last timeseries bucket is clipped to requested range
+- raw events can lag by worker time, usually a few seconds
+
+## Troubleshooting
+
+### Browser shows a CORS error on `/analytics/ingest`
+
+Example:
+
+```text
+Access to fetch at 'https://your-deployment.convex.site/analytics/ingest'
+from origin 'http://localhost:3001' has been blocked by CORS policy:
+No 'Access-Control-Allow-Origin' header is present on the requested resource.
+```
+
+Check these first:
+
+- the browser is using the same write key you used in `provisionDefaultSite`
+- the site was created successfully
+- the current origin is allowed for that site
+
+Why this looks like CORS:
+
+- the ingest route checks the write key and site before returning CORS headers
+- if that check fails, the browser often reports a generic CORS error
+
+Useful fixes:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
+
+- verify your frontend env var matches `ANALYTICS_WRITE_KEY`
+- verify `allowedOrigins` includes your local or production domain
+
+### `components.convexAnalytics` is missing
+
+Run your Convex dev server first so generated component bindings exist:
+
+```sh
+npx convex dev
+```
+
+### Dashboard says the default site is not found
+
+You registered the component and queries, but the site record does not exist yet.
+Run:
+
+```sh
+npx convex run analytics:provisionDefaultSite
+```
 
 ## Dashboard API
 

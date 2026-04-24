@@ -21,7 +21,6 @@ export function registerRoutes(
 	options?: {
 		path?: string;
 		allowedHeaders?: string[];
-		countryLookup?: "headers-only" | "country-is";
 	},
 ) {
 	const path = options?.path ?? "/analytics/ingest";
@@ -56,10 +55,7 @@ export function registerRoutes(
 			}
 			const writeKeyHash = await hashWriteKey(writeKey);
 			const body = await request.json();
-			const country = await getCountry(
-				request,
-				options?.countryLookup ?? "headers-only",
-			);
+			const country = await getCountry(request);
 			const result = await ingestFromHttp(ctx, component, {
 				writeKeyHash,
 				origin,

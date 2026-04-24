@@ -3,19 +3,21 @@ import { usePaginatedQuery } from "convex/react";
 import { S, SECTION_ICONS } from "../constants";
 import { formatDuration, formatNumber } from "../helpers";
 import { Card, LoadMoreBtn, SectionTitle, StatCard, tdSty, thSty, tableSty, tableWrapSty } from "../primitives";
-import type { AnalyticsDashboardProps, OverviewStats } from "../types";
+import type {
+  AnalyticsDashboardProps,
+  OverviewStats,
+  SessionRow,
+} from "../types";
 
 export function SessionsPage({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
   overview,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
   overview: OverviewStats | undefined;
 }) {
   return (
@@ -48,7 +50,7 @@ export function SessionsPage({
           testId="overview-average-duration"
         />
       </div>
-      <SessionsFeed siteId={siteId} api={api} from={from} to={to} />
+      <SessionsFeed siteId={siteId} api={api} windowMs={windowMs} />
     </>
   );
 }
@@ -56,24 +58,23 @@ export function SessionsPage({
 function SessionsFeed({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
 }) {
   const { results, status, loadMore } = usePaginatedQuery(
     api.listSessions,
-    { siteId, from, to },
+    { siteId, windowMs },
     { initialNumItems: 25 },
   );
-  const hasExitPath = results.some((s: any) => Boolean(s.exitPath));
+  const sessions = results as SessionRow[];
+  const hasExitPath = sessions.some((session) => Boolean(session.exitPath));
   return (
     <Card>
       <SectionTitle icon={SECTION_ICONS.Sessions}>Sessions</SectionTitle>
-      {results.length === 0 && status === "Exhausted" ? (
+      {sessions.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No sessions in this period.
         </div>
@@ -93,31 +94,42 @@ function SessionsFeed({
               </tr>
             </thead>
             <tbody>
-              {results.map((s: any) => (
-                <tr key={s._id}>
+              {sessions.map((session) => (
+                <tr key={session._id}>
                   <td
                     style={{ ...tdSty, fontFamily: "monospace", whiteSpace: "nowrap" }}
-                    title={s.sessionId}
+                    title={session.sessionId}
                   >
-                    {s.sessionId}
+                    {session.sessionId}
                   </td>
                   <td style={tdSty}>
-                    {formatDuration(Math.max(0, s.lastSeenAt - s.startedAt))}
+                    {formatDuration(
+                      Math.max(0, session.lastSeenAt - session.startedAt),
+                    )}
                   </td>
-                  <td style={tdSty}>{s.pageviewCount}</td>
-                  <td style={{ ...tdSty, color: S.textSec }} title={s.entryPath ?? "/"}>
-                    {s.entryPath ?? "/"}
+                  <td style={tdSty}>{session.pageviewCount}</td>
+                  <td
+                    style={{ ...tdSty, color: S.textSec }}
+                    title={session.entryPath ?? "/"}
+                  >
+                    {session.entryPath ?? "/"}
                   </td>
                   {hasExitPath ? (
-                    <td style={{ ...tdSty, color: S.textSec }} title={s.exitPath ?? ""}>
-                      {s.exitPath ?? ""}
+                    <td
+                      style={{ ...tdSty, color: S.textSec }}
+                      title={session.exitPath ?? ""}
+                    >
+                      {session.exitPath ?? ""}
                     </td>
                   ) : null}
-                  <td style={{ ...tdSty, color: S.textSec }} title={s.referrer ?? "—"}>
-                    {s.referrer ?? "—"}
+                  <td
+                    style={{ ...tdSty, color: S.textSec }}
+                    title={session.referrer ?? "—"}
+                  >
+                    {session.referrer ?? "—"}
                   </td>
                   <td style={{ ...tdSty, color: S.textSec }}>
-                    {s.device ?? "—"}
+                    {session.device ?? "—"}
                   </td>
                   <td
                     style={{
@@ -127,7 +139,7 @@ function SessionsFeed({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {new Date(s.startedAt).toLocaleString()}
+                    {new Date(session.startedAt).toLocaleString()}
                   </td>
                 </tr>
               ))}

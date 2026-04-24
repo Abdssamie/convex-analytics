@@ -31,6 +31,68 @@ export interface DashboardSummary {
   topSources: TopRow[];
 }
 
+export interface RawEventRow {
+  _id: string;
+  _creationTime: number;
+  siteId: string;
+  receivedAt: number;
+  occurredAt: number;
+  visitorId: string;
+  sessionId: string;
+  eventType: "pageview" | "track" | "identify";
+  eventName: string;
+  path?: string;
+  title?: string;
+  referrer?: string;
+  device?: string;
+  browser?: string;
+  os?: string;
+  country?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  properties?: Record<string, string | number | boolean | null>;
+  identifiedUserId?: string;
+  aggregatedAt?: number | null;
+}
+
+export interface SessionRow {
+  _id: string;
+  _creationTime: number;
+  siteId: string;
+  visitorId: string;
+  sessionId: string;
+  startedAt: number;
+  lastSeenAt: number;
+  entryPath?: string;
+  exitPath?: string;
+  referrer?: string;
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  device?: string;
+  browser?: string;
+  os?: string;
+  country?: string;
+  identifiedUserId?: string;
+  pageviewCount: number;
+}
+
+export interface VisitorRow {
+  _id: string;
+  _creationTime: number;
+  siteId: string;
+  visitorId: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  identifiedUserId?: string;
+  traits?: Record<string, string | number | boolean | null>;
+}
+
+export type PageviewRow = RawEventRow & {
+  exitPath?: string;
+};
+
 export interface AnalyticsDashboardProps {
   siteId: string;
   api: {

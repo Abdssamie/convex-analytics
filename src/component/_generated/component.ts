@@ -27,7 +27,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       getDashboardSummary: FunctionReference<
         "query",
         "internal",
-        { from: number; interval: "hour" | "day"; siteId: string; to: number },
+        {
+          from?: number;
+          interval: "hour" | "day";
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         {
           overview: {
             averageSessionDurationMs: number;
@@ -62,11 +68,12 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         "internal",
         {
           eventName: string;
-          from: number;
+          from?: number;
           limit?: number;
           propertyKey: string;
           siteId: string;
-          to: number;
+          to?: number;
+          windowMs?: number;
         },
         Array<{ count: number; value: string | number | boolean | null }>,
         Name
@@ -74,7 +81,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       getOverview: FunctionReference<
         "query",
         "internal",
-        { from: number; siteId: string; to: number },
+        { from?: number; siteId: string; to?: number; windowMs?: number },
         {
           averageSessionDurationMs: number;
           bounceRate: number;
@@ -88,7 +95,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       getTimeseries: FunctionReference<
         "query",
         "internal",
-        { from: number; interval: "hour" | "day"; siteId: string; to: number },
+        {
+          from?: number;
+          interval: "hour" | "day";
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{
           bucketStart: number;
           events: number;
@@ -101,70 +114,130 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       getTopBrowsers: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopCampaigns: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopCountries: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopDevices: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopEvents: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopMediums: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopOs: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopPages: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopReferrers: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
       getTopSources: FunctionReference<
         "query",
         "internal",
-        { from: number; limit?: number; siteId: string; to: number },
+        {
+          from?: number;
+          limit?: number;
+          siteId: string;
+          to?: number;
+          windowMs?: number;
+        },
         Array<{ count: number; key: string; pageviewCount: number }>,
         Name
       >;
@@ -183,6 +256,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           };
           siteId: string;
           to?: number;
+          windowMs?: number;
         },
         {
           continueCursor: string | null;
@@ -231,6 +305,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           };
           siteId: string;
           to?: number;
+          windowMs?: number;
         },
         {
           continueCursor: string | null;
@@ -279,6 +354,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           };
           siteId: string;
           to?: number;
+          windowMs?: number;
         },
         {
           continueCursor: string | null;
@@ -324,6 +400,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           };
           siteId: string;
           to?: number;
+          windowMs?: number;
         },
         {
           continueCursor: string | null;

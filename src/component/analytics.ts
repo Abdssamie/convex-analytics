@@ -18,11 +18,49 @@ import { floorToBucket, sumRollups, manualPaginate } from "./helpers.js";
 
 const scanPageSize = 256;
 
+type RangeInput = {
+  siteId: IdOfSite;
+  from?: number;
+  to?: number;
+  windowMs?: number;
+};
+
+async function resolveRange(
+  ctx: QueryCtx,
+  args: RangeInput,
+): Promise<{ siteId: IdOfSite; from: number; to: number }> {
+  if (args.from !== undefined) {
+    return {
+      siteId: args.siteId,
+      from: args.from,
+      to: args.to ?? Number.MAX_SAFE_INTEGER,
+    };
+  }
+
+  if (args.windowMs === undefined) {
+    throw new Error("Either from or windowMs is required");
+  }
+
+  const latestEvent = await ctx.db
+    .query("events")
+    .withIndex("by_siteId_and_occurredAt", (q) => q.eq("siteId", args.siteId))
+    .order("desc")
+    .first();
+  const to =
+    latestEvent?.occurredAt !== undefined ? latestEvent.occurredAt + 1 : Date.now();
+  return {
+    siteId: args.siteId,
+    from: Math.max(0, to - args.windowMs),
+    to,
+  };
+}
+
 export const getOverview = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
   },
   returns: v.object({
     events: v.number(),
@@ -33,10 +71,11 @@ export const getOverview = query({
     averageSessionDurationMs: v.number(),
   }),
   handler: async (ctx, args) => {
-    const totals = await aggregateOverviewRange(ctx, args);
+    const range = await resolveRange(ctx, args);
+    const totals = await aggregateOverviewRange(ctx, range);
     const [sessionStats, visitorCount] = await Promise.all([
-      querySessionStats(ctx, args),
-      queryVisitorCount(ctx, args),
+      querySessionStats(ctx, range),
+      queryVisitorCount(ctx, range),
     ]);
     return {
       events: totals.count,
@@ -58,8 +97,9 @@ export const getOverview = query({
 export const getTimeseries = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     interval: v.union(v.literal("hour"), v.literal("day")),
   },
   returns: v.array(
@@ -72,133 +112,168 @@ export const getTimeseries = query({
     }),
   ),
   handler: async (ctx, args) => {
-    return await queryTimeseries(ctx, args);
+    const range = await resolveRange(ctx, args);
+    return await queryTimeseries(ctx, {
+      ...range,
+      interval: args.interval,
+    });
   },
 });
 
 export const getTopPages = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "page", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "page", args.limit ?? 10);
   },
 });
 
 export const getTopReferrers = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "referrer", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "referrer", args.limit ?? 10);
   },
 });
 
 export const getTopSources = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "utmSource", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "utmSource", args.limit ?? 10);
   },
 });
 
 export const getTopMediums = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "utmMedium", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "utmMedium", args.limit ?? 10);
   },
 });
 
 export const getTopCampaigns = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "utmCampaign", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "utmCampaign", args.limit ?? 10);
   },
 });
 export const getTopEvents = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) => {
-    return await topDimension(ctx, args, "event", args.limit ?? 10);
+    const range = await resolveRange(ctx, args);
+    return await topDimension(ctx, range, "event", args.limit ?? 10);
   },
 });
 
 export const getTopDevices = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topVisitorDimension(ctx, args, "device", args.limit ?? 10),
+    topVisitorDimension(
+      ctx,
+      await resolveRange(ctx, args),
+      "device",
+      args.limit ?? 10,
+    ),
 });
 
 export const getTopBrowsers = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topVisitorDimension(ctx, args, "browser", args.limit ?? 10),
+    topVisitorDimension(
+      ctx,
+      await resolveRange(ctx, args),
+      "browser",
+      args.limit ?? 10,
+    ),
 });
 
 export const getTopOs = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topVisitorDimension(ctx, args, "os", args.limit ?? 10),
+    topVisitorDimension(ctx, await resolveRange(ctx, args), "os", args.limit ?? 10),
 });
 
 export const getTopCountries = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(topRowValidator),
   handler: async (ctx, args) =>
-    topVisitorDimension(ctx, args, "country", args.limit ?? 10),
+    topVisitorDimension(
+      ctx,
+      await resolveRange(ctx, args),
+      "country",
+      args.limit ?? 10,
+    ),
 });
 
 // Single combined query for the main dashboard overview page.
@@ -207,8 +282,9 @@ export const getTopCountries = query({
 export const getDashboardSummary = query({
   args: {
     siteId: v.id("sites"),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     interval: v.union(v.literal("hour"), v.literal("day")),
   },
   returns: v.object({
@@ -233,14 +309,15 @@ export const getDashboardSummary = query({
     topSources: v.array(topRowValidator),
   }),
   handler: async (ctx, args) => {
-    const totals = await aggregateOverviewRange(ctx, args);
+    const range = await resolveRange(ctx, args);
+    const totals = await aggregateOverviewRange(ctx, range);
     const [sessionStats, visitorCount, timeseries, topPages, topSources] =
       await Promise.all([
-        querySessionStats(ctx, args),
-        queryVisitorCount(ctx, args),
-        queryTimeseries(ctx, args),
-        topDimension(ctx, args, "page", 5),
-        topDimension(ctx, args, "utmSource", 5),
+        querySessionStats(ctx, range),
+        queryVisitorCount(ctx, range),
+        queryTimeseries(ctx, { ...range, interval: args.interval }),
+        topDimension(ctx, range, "page", 5),
+        topDimension(ctx, range, "utmSource", 5),
       ]);
     return {
       overview: {
@@ -269,13 +346,20 @@ export const getEventPropertyBreakdown = query({
     siteId: v.id("sites"),
     eventName: v.string(),
     propertyKey: v.string(),
-    from: v.number(),
-    to: v.number(),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     limit: v.optional(v.number()),
   },
   returns: v.array(propertyBreakdownRowValidator),
   handler: async (ctx, args) => {
-    return await eventPropertyBreakdown(ctx, args);
+    const range = await resolveRange(ctx, args);
+    return await eventPropertyBreakdown(ctx, {
+      ...range,
+      eventName: args.eventName,
+      propertyKey: args.propertyKey,
+      limit: args.limit,
+    });
   },
 });
 export const listRawEvents = query({
@@ -283,16 +367,18 @@ export const listRawEvents = query({
     siteId: v.id("sites"),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     paginationOpts: paginationOptsValidator,
   },
   returns: paginatedEventsValidator,
   handler: async (ctx, args) => {
+    const range = await resolveRange(ctx, args);
     return await manualPaginate<Infer<typeof eventValidator>>(
       ctx.db.query("events").withIndex("by_siteId_and_occurredAt", (q) =>
         q
-          .eq("siteId", args.siteId)
-          .gte("occurredAt", args.from ?? 0)
-          .lt("occurredAt", args.to ?? Number.MAX_SAFE_INTEGER),
+          .eq("siteId", range.siteId)
+          .gte("occurredAt", range.from)
+          .lt("occurredAt", range.to),
       ).order("desc"),
       args.paginationOpts,
     );
@@ -303,16 +389,18 @@ export const listSessions = query({
     siteId: v.id("sites"),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     paginationOpts: paginationOptsValidator,
   },
   returns: paginatedSessionsValidator,
   handler: async (ctx, args) => {
+    const range = await resolveRange(ctx, args);
     return await manualPaginate<Infer<typeof sessionValidator>>(
       ctx.db.query("sessions").withIndex("by_siteId_and_startedAt", (q) =>
         q
-          .eq("siteId", args.siteId)
-          .gte("startedAt", args.from ?? 0)
-          .lt("startedAt", args.to ?? Number.MAX_SAFE_INTEGER),
+          .eq("siteId", range.siteId)
+          .gte("startedAt", range.from)
+          .lt("startedAt", range.to),
       ).order("desc"),
       args.paginationOpts,
     );
@@ -325,17 +413,19 @@ export const listPageviews = query({
     siteId: v.id("sites"),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     paginationOpts: paginationOptsValidator,
   },
   returns: paginatedEventsValidator,
   handler: async (ctx, args) => {
+    const range = await resolveRange(ctx, args);
     return await manualPaginate<Infer<typeof eventValidator>>(
       ctx.db.query("events").withIndex("by_siteId_and_eventName_and_occurredAt", (q) =>
         q
-          .eq("siteId", args.siteId)
+          .eq("siteId", range.siteId)
           .eq("eventName", "pageview")
-          .gte("occurredAt", args.from ?? 0)
-          .lt("occurredAt", args.to ?? Number.MAX_SAFE_INTEGER),
+          .gte("occurredAt", range.from)
+          .lt("occurredAt", range.to),
       ).order("desc"),
       args.paginationOpts,
     );
@@ -347,16 +437,18 @@ export const listVisitors = query({
     siteId: v.id("sites"),
     from: v.optional(v.number()),
     to: v.optional(v.number()),
+    windowMs: v.optional(v.number()),
     paginationOpts: paginationOptsValidator,
   },
   returns: paginatedVisitorsValidator,
   handler: async (ctx, args) => {
+    const range = await resolveRange(ctx, args);
     return await manualPaginate<Infer<typeof visitorValidator>>(
       ctx.db.query("visitors").withIndex("by_siteId_and_firstSeenAt", (q) =>
         q
-          .eq("siteId", args.siteId)
-          .gte("firstSeenAt", args.from ?? 0)
-          .lt("firstSeenAt", args.to ?? Number.MAX_SAFE_INTEGER),
+          .eq("siteId", range.siteId)
+          .gte("firstSeenAt", range.from)
+          .lt("firstSeenAt", range.to),
       ).order("desc"),
       args.paginationOpts,
     );

@@ -3,13 +3,17 @@ import { usePaginatedQuery } from "convex/react";
 import { INTERVALS, S, SECTION_ICONS } from "../constants";
 import { Card, LoadMoreBtn, SectionTitle, TopList, tdSty, thSty, tableSty, tableWrapSty } from "../primitives";
 import { TrendChart } from "../TrendChart";
-import type { AnalyticsDashboardProps, TimeseriesPoint, TopRow } from "../types";
+import type {
+  AnalyticsDashboardProps,
+  PageviewRow,
+  TimeseriesPoint,
+  TopRow,
+} from "../types";
 
 export function PageViewsPage({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
   timeseries,
   topPages,
   topReferrers,
@@ -17,8 +21,7 @@ export function PageViewsPage({
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
   timeseries: TimeseriesPoint[] | undefined;
   topPages: TopRow[] | undefined;
   topReferrers: TopRow[] | undefined;
@@ -60,7 +63,7 @@ export function PageViewsPage({
         <TopList title="Top Referrers" data={topReferrers} barColor={S.greenStrong} />
       </div>
 
-      <PageviewsFeed siteId={siteId} api={api} from={from} to={to} />
+      <PageviewsFeed siteId={siteId} api={api} windowMs={windowMs} />
     </>
   );
 }
@@ -68,24 +71,23 @@ export function PageViewsPage({
 function PageviewsFeed({
   siteId,
   api,
-  from,
-  to,
+  windowMs,
 }: {
   siteId: string;
   api: AnalyticsDashboardProps["api"];
-  from: number;
-  to: number;
+  windowMs: number;
 }) {
   const { results, status, loadMore } = usePaginatedQuery(
     api.listPageviews,
-    { siteId, from, to },
+    { siteId, windowMs },
     { initialNumItems: 25 },
   );
-  const hasExitPath = results.some((ev: any) => Boolean(ev.exitPath));
+  const pageviews = results as PageviewRow[];
+  const hasExitPath = pageviews.some((pageview) => Boolean(pageview.exitPath));
   return (
     <Card>
       <SectionTitle icon={SECTION_ICONS["Pageview Feed"]}>Pageview Feed</SectionTitle>
-      {results.length === 0 && status === "Exhausted" ? (
+      {pageviews.length === 0 && status === "Exhausted" ? (
         <div style={{ color: S.textMut, fontSize: 13 }}>
           No pageviews in this period.
         </div>
@@ -102,20 +104,23 @@ function PageviewsFeed({
               </tr>
             </thead>
             <tbody>
-              {results.map((ev: any) => (
-                <tr key={ev._id}>
-                  <td style={tdSty} title={ev.path ?? "/"}>
-                    {ev.path ?? "/"}
+              {pageviews.map((pageview) => (
+                <tr key={pageview._id}>
+                  <td style={tdSty} title={pageview.path ?? "/"}>
+                    {pageview.path ?? "/"}
                   </td>
-                  <td style={{ ...tdSty, color: S.textSec }} title={ev.title ?? ""}>
-                    {ev.title ?? ""}
+                  <td
+                    style={{ ...tdSty, color: S.textSec }}
+                    title={pageview.title ?? ""}
+                  >
+                    {pageview.title ?? ""}
                   </td>
                   {hasExitPath ? (
                     <td
                       style={{ ...tdSty, color: S.textSec }}
-                      title={ev.exitPath ?? ""}
+                      title={pageview.exitPath ?? ""}
                     >
-                      {ev.exitPath ?? ""}
+                      {pageview.exitPath ?? ""}
                     </td>
                   ) : null}
                   <td
@@ -125,9 +130,9 @@ function PageviewsFeed({
                       color: S.textSec,
                       whiteSpace: "nowrap",
                     }}
-                    title={ev.visitorId}
+                    title={pageview.visitorId}
                   >
-                    {ev.visitorId}
+                    {pageview.visitorId}
                   </td>
                   <td
                     style={{
@@ -137,7 +142,7 @@ function PageviewsFeed({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {new Date(ev.occurredAt).toLocaleString()}
+                    {new Date(pageview.occurredAt).toLocaleString()}
                   </td>
                 </tr>
               ))}

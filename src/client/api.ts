@@ -234,8 +234,9 @@ export function exposeApi(
     getDashboardSummary: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         interval: v.union(v.literal("hour"), v.literal("day")),
       },
       handler: async (ctx, args) => {
@@ -247,7 +248,12 @@ export function exposeApi(
       },
     }),
     getOverview: queryGeneric({
-      args: { siteId: v.string(), from: v.number(), to: v.number() },
+      args: {
+        siteId: v.string(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
+      },
       handler: async (ctx, args) => {
         await options.auth(ctx, { type: "read", siteId: args.siteId });
         return await ctx.runQuery(component.analytics.getOverview, args);
@@ -256,8 +262,9 @@ export function exposeApi(
     getTimeseries: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         interval: v.union(v.literal("hour"), v.literal("day")),
       },
       handler: async (ctx, args) => {
@@ -270,8 +277,9 @@ export function exposeApi(
         siteId: v.string(),
         eventName: v.string(),
         propertyKey: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -285,8 +293,9 @@ export function exposeApi(
     getTopPages: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -297,8 +306,9 @@ export function exposeApi(
     getTopReferrers: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -309,8 +319,9 @@ export function exposeApi(
     getTopSources: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -321,8 +332,9 @@ export function exposeApi(
     getTopMediums: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -333,8 +345,9 @@ export function exposeApi(
     getTopCampaigns: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -345,8 +358,9 @@ export function exposeApi(
     getTopEvents: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -357,8 +371,9 @@ export function exposeApi(
     getTopDevices: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -369,8 +384,9 @@ export function exposeApi(
     getTopBrowsers: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -381,8 +397,9 @@ export function exposeApi(
     getTopOs: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -393,8 +410,9 @@ export function exposeApi(
     getTopCountries: queryGeneric({
       args: {
         siteId: v.string(),
-        from: v.number(),
-        to: v.number(),
+        from: v.optional(v.number()),
+        to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         limit: v.optional(v.number()),
       },
       handler: async (ctx, args) => {
@@ -407,6 +425,7 @@ export function exposeApi(
         siteId: v.string(),
         from: v.optional(v.number()),
         to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         paginationOpts: paginationOptsValidator,
       },
       handler: async (ctx, args) => {
@@ -419,6 +438,7 @@ export function exposeApi(
         siteId: v.string(),
         from: v.optional(v.number()),
         to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         paginationOpts: paginationOptsValidator,
       },
       handler: async (ctx, args) => {
@@ -431,6 +451,7 @@ export function exposeApi(
         siteId: v.string(),
         from: v.optional(v.number()),
         to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         paginationOpts: paginationOptsValidator,
       },
       handler: async (ctx, args) => {
@@ -443,6 +464,7 @@ export function exposeApi(
         siteId: v.string(),
         from: v.optional(v.number()),
         to: v.optional(v.number()),
+        windowMs: v.optional(v.number()),
         paginationOpts: paginationOptsValidator,
       },
       handler: async (ctx, args) => {
