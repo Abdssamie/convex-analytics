@@ -127,12 +127,9 @@ export function getHeaderCountry(request: Request) {
 	return undefined;
 }
 
-export async function getCountryWithFallback(
-	request: Request,
-	mode: "headers-only" | "country-is",
-) {
+export async function getCountryWithFallback(request: Request) {
 	const headerCountry = getHeaderCountry(request);
-	if (headerCountry || mode === "headers-only") {
+	if (headerCountry) {
 		return headerCountry;
 	}
 
@@ -157,11 +154,8 @@ export async function getCountryWithFallback(
 	}
 }
 
-export async function getCountry(
-	request: Request,
-	mode: "headers-only" | "country-is" = "headers-only",
-) {
-	return await getCountryWithFallback(request, mode);
+export async function getCountry(request: Request) {
+	return await getCountryWithFallback(request);
 }
 
 function isValidIp(ip: string) {
