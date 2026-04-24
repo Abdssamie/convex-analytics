@@ -122,7 +122,7 @@ Auto-init with one script tag:
 ```html
 <script
   defer
-  src="https://unpkg.com/@abdssamie/convex-analytics@0.1.2/dist/embed/convex-analytics.js"
+  src="https://unpkg.com/@abdssamie/convex-analytics@0.1.4/dist/embed/convex-analytics.js"
   data-endpoint="https://your-deployment.convex.site/analytics/ingest"
   data-write-key="write_..."
   data-auto-pageviews="true"
@@ -132,7 +132,7 @@ Auto-init with one script tag:
 Or initialize it manually:
 
 ```html
-<script src="https://unpkg.com/@abdssamie/convex-analytics@0.1.2/dist/embed/convex-analytics.js"></script>
+<script src="https://unpkg.com/@abdssamie/convex-analytics@0.1.4/dist/embed/convex-analytics.js"></script>
 <script>
   window.ConvexAnalytics.init({
     endpoint: "https://your-deployment.convex.site/analytics/ingest",
