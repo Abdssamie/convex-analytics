@@ -1,11 +1,15 @@
+<!-- START: Include on https://convex.dev/components -->
+
 # Convex Analytics
 
-A Convex component for first-party product and web analytics. It stores events
-directly in your Convex deployment, with browser batching, anonymous visitors,
-sessions, raw event history, and async rollup-backed reports.
+A first-party, real-time product analytics component for Convex. Track pageviews, custom events, and user identity directly into your own database—no third-party services required.
 
-This component is designed for apps that want core analytics
-without running a separate analytics service.
+- **Real-time Ingestion**: High-speed HTTP endpoint for event landing.
+- **Drop-in Dashboard**: A complete React component with timeseries charts and metrics.
+- **First-party Data**: You own the data; it stays in your Convex deployment.
+- **Browser SDK**: Tiny, dependency-free client with auto-batching.
+
+<!-- END: Include on https://convex.dev/components -->
 
 ## Quick Start
 
