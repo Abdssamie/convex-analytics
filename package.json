@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "convex dev --run example:setupDefaultSite --start 'npm run dev:build'",
     "dev:frontend": "cd example && vite",
+    "example:build": "cd example && vite build",
     "dev:build": "chokidar 'tsconfig*.json' 'src/**/*.ts' -i '**/*.test.ts' -c 'npm run build:codegen' --initial",
     "predev": "convex init && npm run build:codegen",
     "build": "tsc --build ./tsconfig.build.json --force",
