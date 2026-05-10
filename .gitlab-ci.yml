@@ -1,0 +1,23 @@
+image: node:24
+
+stages:
+  - verify
+
+verify:
+  stage: verify
+  script:
+    - npm ci
+    - npm run verify:release
+  allow_failure: false
+
+publish:
+  stage: verify
+  script:
+    - npm ci
+    - npm run verify:release
+    - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > .npmrc
+    - npm publish --access public --provenance
+  only:
+    - tags
+  when: manual
+  allow_failure: false
