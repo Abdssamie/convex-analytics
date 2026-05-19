@@ -41,7 +41,8 @@ publish:npm:
     - test -n "$NPM_TOKEN"
     - node -e 'const pkg = require("./package.json"); const tag = process.env.CI_COMMIT_TAG || ""; const expected = "v" + pkg.version; if (tag !== expected) throw new Error("Tag " + tag + " does not match package version " + expected);'
     - pnpm run build
+    - pnpm run build:embed
     - printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > .npmrc
-    - pnpm publish --access public --no-git-checks
+    - pnpm publish --access public --no-git-checks --ignore-scripts
   rules:
     - if: "$CI_COMMIT_TAG =~ /^v\\d+\\.\\d+\\.\\d+$/"
