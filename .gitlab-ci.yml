@@ -1,23 +1,47 @@
 image: node:24
 
 stages:
-  - verify
+  - validate
+  - publish
 
-verify:
-  stage: verify
-  script:
-    - npm ci
-    - npm run verify:release
-  allow_failure: false
+variables:
+  PNPM_HOME: "$CI_PROJECT_DIR/.pnpm"
+  PNPM_STORE_DIR: "$CI_PROJECT_DIR/.pnpm-store"
 
-publish:
-  stage: verify
+cache:
+  key:
+    files:
+      - pnpm-lock.yaml
+  paths:
+    - .pnpm-store/
+    - .pnpm/
+
+before_script:
+  - corepack enable
+  - corepack prepare pnpm@10.33.1 --activate
+  - pnpm config set store-dir "$PNPM_STORE_DIR"
+  - pnpm install --frozen-lockfile
+
+validate:
+  stage: validate
   script:
-    - npm ci
-    - npm run verify:release
-    - echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" > .npmrc
-    - npm publish --access public --provenance
-  only:
-    - tags
-  when: manual
-  allow_failure: false
+    - pnpm run build
+    - pnpm run typecheck
+    - pnpm run test --pool=forks
+  rules:
+    - if: "$CI_PIPELINE_SOURCE == 'merge_request_event'"
+    - if: "$CI_COMMIT_BRANCH"
+    - if: "$CI_COMMIT_TAG"
+
+publish:npm:
+  stage: publish
+  needs:
+    - validate
+  script:
+    - test -n "$NPM_TOKEN"
+    - node -e 'const pkg = require("./package.json"); const tag = process.env.CI_COMMIT_TAG || ""; const expected = "v" + pkg.version; if (tag !== expected) throw new Error("Tag " + tag + " does not match package version " + expected);'
+    - pnpm run build
+    - printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > .npmrc
+    - pnpm publish --access public --no-git-checks
+  rules:
+    - if: "$CI_COMMIT_TAG =~ /^v\\d+\\.\\d+\\.\\d+$/"

@@ -4,3 +4,7 @@ export * from "./maintenance";
 export * from "./tracker";
 export * from "./types";
 export * from "./ua";
+export * from "./storage";
+export * from "./core";
+export * from "./browserStorage";
+export * from "./browserContext";

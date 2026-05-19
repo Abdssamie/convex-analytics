@@ -548,6 +548,73 @@ These are admin functions. Do not call them from browser clients.
 Use `runUntilComplete: true` only for one-off backfills or after downtime. For
 normal production cron, keep it unset and let each run delete a bounded batch.
 
+## React Native SDK
+
+Install AsyncStorage alongside this package:
+
+```sh
+npm install @react-native-async-storage/async-storage
+```
+
+Then use the React Native entry point:
+
+```ts
+import { createRnAnalytics } from "@abdssamie/convex-analytics/react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+
+const analytics = await createRnAnalytics({
+  endpoint: "https://your-deployment.convex.site/analytics/ingest",
+  writeKey: process.env.ANALYTICS_WRITE_KEY!,
+  storage: AsyncStorage,
+});
+
+analytics.track("screen_view", { screen: "Home" });
+analytics.identify("user_123", { tier: "pro" });
+```
+
+The React Native SDK uses the same ingestion engine as the browser SDK.
+The only difference is the storage layer: instead of `localStorage`/`sessionStorage`,
+it uses `@react-native-async-storage/async-storage` (or any compatible storage provider).
+
+### Custom storage provider
+
+If you prefer a different storage backend, pass any object that implements
+`getItem` and `setItem`:
+
+```ts
+const analytics = await createRnAnalytics({
+  endpoint: "...",
+  writeKey: "...",
+  storage: {
+    getItem: (key: string) => Promise<string | null>,
+    setItem: (key: string, value: string) => Promise<void>,
+  },
+});
+```
+
+### Auto pageviews
+
+Unlike the browser SDK, the React Native SDK does not auto-track pageviews.
+Call `analytics.track("screen_view", { screen: "Home" })` on navigation events:
+
+```ts
+import { useNavigation } from "@react-navigation/native";
+
+function App() {
+  const navigation = useNavigation();
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener("state", () => {
+      const route = navigation.getCurrentRoute();
+      if (route) {
+        analytics.track("screen_view", { screen: route.name });
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
+}
+```
+
 ## Browser SDK
 
 Use the browser helper in your frontend:
@@ -576,6 +643,8 @@ The SDK stores:
 - queued events in memory only
 
 It flushes on interval, batch size, and `pagehide`.
+
+For React Native, see the [React Native SDK](#react-native-sdk) section below.
 
 `autoPageviews: true` works for traditional full-page loads. For SPAs, call
 `analytics.page()` on route changes yourself:

@@ -6,7 +6,7 @@
   "bugs": {
     "url": "https://github.com/Abdssamie/convex-analytics/issues"
   },
-  "version": "0.1.6",
+  "version": "0.2.1",
   "license": "Apache-2.0",
   "keywords": [
     "convex",
@@ -52,6 +52,10 @@
     },
     "./embed": "./dist/embed/convex-analytics.js",
     "./embed.js": "./dist/embed/convex-analytics.js",
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "default": "./dist/react-native/index.js"
+    },
     "./react": {
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
