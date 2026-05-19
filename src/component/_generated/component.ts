@@ -454,17 +454,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         Name
       >;
     };
-    local: {
-      wipe: {
-        wipePage: FunctionReference<
-          "mutation",
-          "internal",
-          { limit?: number },
-          { deleted: number; hasMore: boolean; lastTable: string | null },
-          Name
-        >;
-      };
-    };
     maintenance: {
       cleanupSite: FunctionReference<
         "action",
